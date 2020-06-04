@@ -1,0 +1,36 @@
+{
+  "git": {
+    "origin": "...",
+    "author": {
+      "name": "Mojang",
+      "email": "..."
+    },
+    "committer": {
+      "name": "...",
+      "email": "..."
+    }
+  },
+  "sources": {
+    "mojang/cfr": {
+      "mappings": "mojang",
+      "decompiler": "cfr"
+    }
+  },
+  "branches": {
+    "master": {
+      "source": "mojang/cfr",
+      "filter": {
+        "exclude": ["20w14infinite"]
+      }
+    },
+    "20w14infinite": {
+      "source": "mojang/cfr",
+      "head": "20w14infinite"
+    },
+    "test": {
+      "source": "mojang/cfr",
+      "base": "20w15a",
+      "head": "20w16a"
+    }
+  }
+}
