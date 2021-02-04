@@ -36,7 +36,7 @@ data class GitConfig(val origin: String, val author: GitPerson, val committer: G
 data class GitPerson(val name: String, val email: String)
 typealias SourcesConfig = Map<String, SourceConfig>
 typealias BranchesConfig = Map<String, BranchConfig>
-data class SourceConfig(val mappings: MappingProvider, val decompiler: Decompiler)
+data class SourceConfig(val mappings: MappingProvider, val decompiler: Decompiler, val processStructures: Boolean)
 data class BranchConfig(val source: String, val head: String?, val base: String?, val filter: FilterConfig)
 data class FilterConfig(val type: String?, val exclude: List<String>) : Function1<VersionInfo, Boolean> {
     override fun invoke(version: VersionInfo) = when {
@@ -73,7 +73,8 @@ val GSON: Gson = GsonBuilder()
     .registerTypeAdapter<JsonObject, SourceConfig> { obj, _, context ->
         val mappings: MappingProvider = obj.require("mappings", context)
         val decompiler: Decompiler = obj.require("decompiler", context)
-        SourceConfig(mappings, decompiler)
+        val processStructures = obj["processStructures", context] ?: true
+        SourceConfig(mappings, decompiler, processStructures)
     }
     .registerTypeAdapter<JsonPrimitive, MappingProvider> { prim, _, _ ->
         when (val s = prim.asString) {

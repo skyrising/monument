@@ -12,10 +12,12 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.stream.Collectors
+import kotlin.system.exitProcess
 
 
 val OUTPUT_DIR: Path = Paths.get(System.getenv("MONUMENT_OUTPUT") ?: "output")
 val REPO_DIR: Path = OUTPUT_DIR.resolve("guardian.git")
+val TEMP_REPO_DIR: Path = OUTPUT_DIR.resolve("guardian-temp")
 val SOURCES_DIR: Path = OUTPUT_DIR.resolve("sources")
 
 val CACHE_DIR: Path = Paths.get(System.getenv("MONUMENT_CACHE") ?: ".cache")
@@ -25,18 +27,23 @@ fun main(args: Array<String>) {
     when (args.size) {
         0 -> update()
         1 -> update(args[0])
-        else -> println("usage: monument [branch]")
+        2 -> update(args[0], args[1])
+        else -> println("usage: monument [branch] [action]")
     }
 }
 
-fun update(branch: String = "master") {
-    Files.createDirectories(OUTPUT_DIR)
-    Files.createDirectories(REPO_DIR)
-    if (!Files.exists(REPO_DIR.resolve("HEAD"))) {
-        git(REPO_DIR, "init", "--bare").join()
-        println("Created bare repository $REPO_DIR")
+fun update(branch: String = "master", action: String = "update") {
+    val startTime = System.currentTimeMillis()
+    val check = action == "check"
+    if (!check) {
+        Files.createDirectories(OUTPUT_DIR)
+        Files.createDirectories(REPO_DIR)
+        if (!Files.exists(REPO_DIR.resolve("HEAD"))) {
+            git(REPO_DIR, "init", "--bare").join()
+            println("Created bare repository $REPO_DIR")
+        }
+        Files.createDirectories(SOURCES_DIR)
     }
-    Files.createDirectories(SOURCES_DIR)
     val config = readConfig(Files.newBufferedReader(Paths.get("config.json"))).join()
     val branchConfig = config.branches[branch]
     if (branchConfig == null) {
@@ -46,8 +53,9 @@ fun update(branch: String = "master") {
     val sourceConfig = config.sources[branchConfig.source]
     if (sourceConfig == null) {
         System.err.println("No definition for source '${branchConfig.source}'")
+        return
     }
-    val (mappings, decompiler) = sourceConfig!!
+    val (mappings, decompiler, processStructures) = sourceConfig
 
     val versions = mcVersions.join()
     fun getVersion(id: String?): VersionInfo? {
@@ -72,31 +80,52 @@ fun update(branch: String = "master") {
         Files.notExists(getSourcePath(it.id, mappings, decompiler))
     }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
     println("Source code for ${spellVersions(missing.size)} missing")
+
+    if (check) exitProcess(if (missing.isEmpty()) 1 else 0)
+
     if (missing.isNotEmpty()) {
         val futures = mutableListOf<CompletableFuture<Path>>()
         enableOutput()
-        for (version in missing) futures.add(genSources(version.id, mappings, decompiler))
-        sysOut.println("Waiting for sources to generate")
+        for (version in missing) futures.add(genSources(version.id, mappings, decompiler, processStructures))
+        val all = CompletableFuture.allOf(*futures.toTypedArray())
+            sysOut.println("Waiting for sources to generate")
         var lines = 0
-        var allDone = false
-        while (!allDone) {
+        while (!all.isDone) {
             if (lines > 0) sysOut.print("\u001b[${lines}A\u001b[J")
             lines = 0
-            for ((key, line) in outputs) {
-                lines++
-                sysOut.println("$key: $line")
+            val listedOutputs = linkedSetOf<String>()
+            for (key in persistentOutputs) {
+                val line = outputs[key]
+                if (line != null) listedOutputs.add("$key: $line")
             }
-            allDone = true
-            for (f in futures) allDone = allDone && f.isDone
-            if (!allDone) Thread.sleep(100)
+            for ((thread, key) in outputsByThread) {
+                if (!thread.isAlive) continue
+                val line = outputs[key]
+                if (line != null) listedOutputs.add("$key: $line")
+            }
+            for (line in listedOutputs) {
+                lines++
+                sysOut.println(line)
+            }
+            if (!all.isDone) Thread.sleep(100)
         }
         disableOutput()
+        if (all.isCompletedExceptionally) {
+            try {
+                all.get()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                exitProcess(1)
+            }
+        }
         println("All sources generated")
     }
     println("Creating branch '$branch'")
     val history = mutableListOf<CommitTemplate>()
     for (version in supported) history.add(CommitTemplate(version, getSourcePath(version.id, mappings, decompiler)))
     createBranch(branch, config.git, history)
+    val time = (System.currentTimeMillis() - startTime) / 1000.0
+    println(String.format(Locale.ROOT, "Done in %.3fs", time))
 }
 
 fun spellVersions(count: Int) = if (count == 1) "$count version" else "$count versions"
@@ -112,15 +141,17 @@ fun getMappedMergedJar(version: String, provider: MappingProvider): CompletableF
     }
 }
 
-fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler): CompletableFuture<Path> {
+fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, processStructures: Boolean): CompletableFuture<Path> {
     val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version)
     Files.createDirectories(out)
     val resOut = out.resolve("src").resolve("main").resolve("resources")
     val javaOut = out.resolve("src").resolve("main").resolve("java")
     return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
-        extractResources(jar, resOut)
+        extractResources(jar, resOut, processStructures)
     }.thenCompose {
+        val metaInf = resOut.resolve("META-INF")
+        if (Files.exists(metaInf)) rmrf(metaInf)
         getMappedMergedJar(version, provider).thenCompose { jar ->
             if (Files.exists(javaOut)) rmrf(javaOut)
             Files.createDirectories(javaOut)
@@ -129,7 +160,7 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
             decompiler.decompile(version, jar, javaOut)
         }
     }.thenCompose {
-        generateGradleBuild(version, out)
+        extractGradle(version, out)
     }.thenApply {
         closeOutput(version)
         out
@@ -139,25 +170,29 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
 data class CommitTemplate(val version: VersionInfo, val source: Path)
 
 fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate>) {
-    val temp = Files.createTempDirectory("monument-")
-    git(temp, "init").join()
-    git(temp, "remote", "add", "guardian", REPO_DIR.toAbsolutePath().toString()).join()
-    git(temp, "checkout", "-b", branch).join()
+    if (Files.exists(TEMP_REPO_DIR)) rmrf(TEMP_REPO_DIR)
+    Files.createDirectories(TEMP_REPO_DIR)
+    git(TEMP_REPO_DIR, "init").join()
+    git(TEMP_REPO_DIR, "remote", "add", "guardian", REPO_DIR.toAbsolutePath().toString()).join()
+    git(TEMP_REPO_DIR, "checkout", "-b", branch).join()
     for (commit in history) {
-        val destFiles = mutableListOf<Path>()
-        // TODO: is there a better way of doing this using git worktree without copying?
+        val destFiles = mutableMapOf<Path, Path>()
         Files.list(commit.source).forEach {
-            val dest = temp.resolve(commit.source.relativize(it))
-            destFiles.add(dest)
-            copy(it, dest)
+            val dest = TEMP_REPO_DIR.resolve(commit.source.relativize(it))
+            destFiles[dest] = it
+            Files.move(it, dest)
         }
         println("${commit.version.id}: ${commit.source.toAbsolutePath()}")
-        git(temp, "add", ".").join()
-        gitCommit(temp, commit.version.releaseTime, config, "-m", commit.version.id)
-        for (repoFile in destFiles) rmrf(repoFile)
+        git(TEMP_REPO_DIR, "add", ".").join()
+        gitCommit(TEMP_REPO_DIR, commit.version.releaseTime, config, "-m", commit.version.id).join()
+        val tag = if (branch == "master") commit.version.id else "$branch-${commit.version.id}"
+        git(TEMP_REPO_DIR, "tag", tag).join()
+        // for (repoFile in destFiles) rmrf(repoFile)
+        for ((a, b) in destFiles) Files.move(a, b)
     }
-    git(temp, "push", "--force", "--set-upstream", "guardian", branch).join()
-    rmrf(temp)
+    git(TEMP_REPO_DIR, "push", "--force", "--set-upstream", "guardian", branch).join()
+    git(TEMP_REPO_DIR, "push", "--tags", "--force").join()
+    rmrf(TEMP_REPO_DIR)
 }
 
 fun git(dir: Path, vararg args: String): CompletableFuture<Int> {
@@ -199,6 +234,8 @@ data class Context(val executor: ExecutorService) {
 }
 
 private val outputs = mutableMapOf<String, String>()
+private val persistentOutputs = listOf("sysout", "syserr")
+private val outputsByThread = linkedMapOf<Thread, String>()
 private var outputEnabled = false
 private val sysOut = System.out
 private val sysErr = System.err
@@ -229,11 +266,13 @@ private fun disableOutput() {
 }
 
 fun output(key: String, line: String) {
+    outputsByThread[Thread.currentThread()] = key
     if (outputEnabled) outputs[key] = line
     else println("$key: $line")
 }
 
 fun <R> outputTo(key: String, cb: () -> R): R {
+    outputsByThread[Thread.currentThread()] = key
     outputToKey.set(key)
     val r = cb()
     outputToKey.set(null)

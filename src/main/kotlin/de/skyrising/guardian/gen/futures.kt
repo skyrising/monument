@@ -15,7 +15,7 @@ inline fun <T> immediate(futured: () -> CompletableFuture<T>): T {
     return fut.get()
 }
 
-class ImmediateExecutorService() : AbstractExecutorService() {
+class ImmediateExecutorService : AbstractExecutorService() {
     private val thread = Thread.currentThread()
 
     private inline fun checkThread() {
