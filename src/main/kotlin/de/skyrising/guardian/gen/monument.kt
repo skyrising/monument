@@ -1,5 +1,6 @@
 package de.skyrising.guardian.gen
 
+import java.io.FileOutputStream
 import java.io.OutputStream
 import java.io.PrintStream
 import java.nio.file.Files
@@ -152,12 +153,15 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
     }.thenCompose {
         val metaInf = resOut.resolve("META-INF")
         if (Files.exists(metaInf)) rmrf(metaInf)
-        getMappedMergedJar(version, provider).thenCompose { jar ->
+        val jarFuture = getMappedMergedJar(version, provider)
+        val libsFuture = downloadLibraries(version)
+        CompletableFuture.allOf(jarFuture, libsFuture).thenCompose {
+            val jar = jarFuture.get()
+            val libs = libsFuture.get()
             if (Files.exists(javaOut)) rmrf(javaOut)
             Files.createDirectories(javaOut)
             output(version, "Decompiling with ${decompiler.name}")
-            // TODO: libraries on classpath
-            decompiler.decompile(version, jar, javaOut)
+            decompiler.decompile(version, jar, javaOut, libs)
         }
     }.thenCompose {
         extractGradle(version, out)
@@ -234,6 +238,7 @@ data class Context(val executor: ExecutorService) {
 }
 
 private val outputs = mutableMapOf<String, String>()
+private val outputStreams = mutableMapOf<String, PrintStream>()
 private val persistentOutputs = listOf("sysout", "syserr")
 private val outputsByThread = linkedMapOf<Thread, String>()
 private var outputEnabled = false
@@ -247,12 +252,18 @@ private fun enableOutput() {
         private val line = StringBuilder()
         override fun write(b: Int) {
             val k = outputToKey.get() ?: key
+            getOutputPrintStream(k).write(b)
             if (b == '\n'.toInt()) {
                 outputs[k] = line.toString()
                 line.clear()
             } else {
                 line.append(b.toChar())
             }
+        }
+
+        override fun flush() {
+            val k = outputToKey.get() ?: key
+            getOutputPrintStream(k).flush()
         }
     })
     System.setOut(outStream("sysout"))
@@ -267,8 +278,17 @@ private fun disableOutput() {
 
 fun output(key: String, line: String) {
     outputsByThread[Thread.currentThread()] = key
-    if (outputEnabled) outputs[key] = line
-    else println("$key: $line")
+    if (outputEnabled) {
+        outputs[key] = line
+    } else {
+        println("$key: $line")
+    }
+    getOutputPrintStream(key).println(line)
+}
+
+fun getOutputPrintStream(key: String) = outputStreams.computeIfAbsent(key) {
+    Files.createDirectories(Paths.get("logs"))
+    PrintStream(FileOutputStream("logs/$key.log"))
 }
 
 fun <R> outputTo(key: String, cb: () -> R): R {

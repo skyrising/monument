@@ -21,6 +21,7 @@ val JARS_SERVER_DIR: Path = JARS_DIR.resolve("server")
 val JARS_MERGED_DIR: Path = JARS_DIR.resolve("merged")
 
 val MOJANG_CACHE_DIR: Path = CACHE_DIR.resolve("mojang")
+val LIBS_CACHE_DIR: Path = MOJANG_CACHE_DIR.resolve("libraries")
 
 private fun requestJson(url: URI): CompletableFuture<JsonObject> = supplyAsync {
     println("Fetching $url")
@@ -72,6 +73,37 @@ fun getVersionManifest(id: String) = versionManifests.computeIfAbsent(id, ::fetc
 
 fun downloadFile(id: String, download: String, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = getVersionManifest(id).thenCompose {
     startDownload(it["downloads"]?.asJsonObject, download, file, listener)
+}
+
+fun downloadLibraries(id: String) = getVersionManifest(id).thenCompose {
+    val libs = it["libraries"]?.asJsonArray ?: return@thenCompose CompletableFuture.completedFuture(emptyList<Path>())
+    val futures = mutableListOf<CompletableFuture<Path>>()
+    for (lib in libs) {
+        val obj = lib.asJsonObject
+        val rules = obj["rules"]?.asJsonArray
+        if (rules != null) {
+            var enabled = true
+            for (rule in rules) {
+                val ruleObj = rule.asJsonObject
+                val action = ruleObj["action"].asJsonPrimitive.asString == "allow"
+                if (ruleObj.has("os")) {
+                    if (ruleObj["os"]!!.asJsonObject["name"]!!.asString != "osx") continue
+                }
+                enabled = action
+            }
+            if (!enabled) continue
+        }
+        futures.add(downloadLibrary(obj["downloads"]!!.asJsonObject))
+    }
+    CompletableFuture.allOf(*futures.toTypedArray()).thenApply {
+        futures.map(CompletableFuture<Path>::get).toList()
+    }
+}
+
+private fun downloadLibrary(obj: JsonObject): CompletableFuture<Path> {
+    val artifact = obj["artifact"]!!.asJsonObject
+    val path = LIBS_CACHE_DIR.resolve(artifact["path"]!!.asString)
+    return download(URL(artifact["url"]!!.asString), path, null).thenApply { path }
 }
 
 private fun startDownload(downloads: JsonObject?, download: String, file: Path, listener: ((DownloadProgress) -> Unit)?): CompletableFuture<Boolean> {

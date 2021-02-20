@@ -54,6 +54,7 @@ sealed class Tag {
 
         fun getId(tag: Tag) = tagToId[tag::class]!!
         fun read(id: Int, din: DataInput) = getReader<Tag>(id)(din)
+        @Suppress("UNCHECKED_CAST")
         fun <T : Tag> getReader(id: Int): (DataInput) -> T = idToReader[id] as ((DataInput) -> T)? ?: throw IllegalArgumentException(
             "Unknown tag type $id"
         )
@@ -89,7 +90,7 @@ sealed class Tag {
 
 object EndTag : Tag() {
     override fun write(out: DataOutput) {}
-    fun read(din: DataInput) = EndTag
+    fun read(@Suppress("UNUSED_PARAMETER") din: DataInput) = EndTag
     override fun toString(sb: StringBuilder, depth: Int, path: LinkedList<String>, indentString: String) {}
 }
 

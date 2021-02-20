@@ -18,6 +18,7 @@ inline fun <T> immediate(futured: () -> CompletableFuture<T>): T {
 class ImmediateExecutorService : AbstractExecutorService() {
     private val thread = Thread.currentThread()
 
+    @Suppress("NOTHING_TO_INLINE")
     private inline fun checkThread() {
         if (Thread.currentThread() != thread) throw IllegalStateException("Calling immediate executor from wrong thread")
     }
