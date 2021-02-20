@@ -56,8 +56,8 @@ interface MappingProvider {
 abstract class CommonMappingProvider(override val name: String, override val format: MappingFormat, private val ext: String) : MappingProvider {
     abstract fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URL?>
     override fun supportsVersion(version: String, target: MappingTarget, cache: Path): CompletableFuture<Boolean> = getUrl(getPath(cache, version), version, target).thenApply { it != null }
-    override fun getLatestMappingVersion(version: String, target: MappingTarget, cache: Path) = CompletableFuture.completedFuture(version)
-    override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path) = getUrl(getPath(cache, mappingVersion), mappingVersion, target).thenApply { url ->
+    override fun getLatestMappingVersion(version: String, target: MappingTarget, cache: Path): CompletableFuture<String> = CompletableFuture.completedFuture(version)
+    override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> = getUrl(getPath(cache, mappingVersion), mappingVersion, target).thenApply { url ->
         if (url == null) return@thenApply null
         val mappingsFile = getPath(cache, mappingVersion).resolve("mappings-${target.id}.${ext}")
         download(url, mappingsFile).join()
@@ -69,7 +69,7 @@ abstract class CommonMappingProvider(override val name: String, override val for
 
 abstract class JarMappingProvider(override val name: String, override val format: MappingFormat) : CommonMappingProvider(name, format, "jar") {
     abstract fun getFile(version: String, target: MappingTarget, jar: FileSystem): Path
-    override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path) = getUrl(getPath(cache, mappingVersion), mappingVersion, target).thenApply { url ->
+    override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> = getUrl(getPath(cache, mappingVersion), mappingVersion, target).thenApply { url ->
         if (url == null) return@thenApply null
         val jarFile = getPath(cache, mappingVersion).resolve("mappings-${target.id}.jar")
         download(url, jarFile).join()
@@ -83,8 +83,6 @@ abstract class JarMappingProvider(override val name: String, override val format
 enum class MappingTarget(val id: String) {
     CLIENT("client"), SERVER("server"), MERGED("merged");
 }
-
-data class MappingsReference(val format: MappingFormat, val path: Path, val target: MappingTarget)
 
 fun getMappings(provider: MappingProvider, version: String, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<EntryTree<EntryMapping>?> {
     return provider.getMappings(version, target, cache).thenCompose {

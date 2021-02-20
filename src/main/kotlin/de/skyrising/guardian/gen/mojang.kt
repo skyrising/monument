@@ -33,7 +33,7 @@ private fun requestJson(url: URI): CompletableFuture<JsonObject> = supplyAsync {
 val mcGameVersionManifest: CompletableFuture<JsonObject> by lazy { requestJson(URI("https://launchermeta.mojang.com/mc/game/version_manifest.json")) }
 val mcVersions: CompletableFuture<Map<String, VersionInfo>> by lazy { getVersions() }
 
-fun getVersionInfo(id: String) = mcVersions.thenApply { it[id] }
+fun getVersionInfo(id: String): CompletableFuture<VersionInfo?> = mcVersions.thenApply { it[id] }
 
 data class VersionInfo(val id: String, val type: String, val url: URI, val time: LocalDateTime, val releaseTime: LocalDateTime) : Comparable<VersionInfo?> {
     override fun compareTo(other: VersionInfo?) = releaseTime.compareTo(other?.releaseTime)
@@ -71,11 +71,11 @@ private fun fetchVersionManifest(id: String) = getVersionInfo(id).thenCompose {
 
 fun getVersionManifest(id: String) = versionManifests.computeIfAbsent(id, ::fetchVersionManifest)
 
-fun downloadFile(id: String, download: String, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = getVersionManifest(id).thenCompose {
+fun downloadFile(id: String, download: String, file: Path, listener: ((DownloadProgress) -> Unit)? = null): CompletableFuture<Boolean> = getVersionManifest(id).thenCompose {
     startDownload(it["downloads"]?.asJsonObject, download, file, listener)
 }
 
-fun downloadLibraries(id: String) = getVersionManifest(id).thenCompose {
+fun downloadLibraries(id: String): CompletableFuture<List<Path>> = getVersionManifest(id).thenCompose {
     val libs = it["libraries"]?.asJsonArray ?: return@thenCompose CompletableFuture.completedFuture(emptyList<Path>())
     val futures = mutableListOf<CompletableFuture<Path>>()
     for (lib in libs) {
@@ -138,7 +138,7 @@ fun getJar(id: String, target: MappingTarget): CompletableFuture<Path> {
 
 private data class Dependency(val dependency: String, val type: String = "implementation")
 
-fun generateGradleBuild(id: String, dir: Path) = getVersionManifest(id).thenApply { manifest ->
+fun generateGradleBuild(id: String, dir: Path): CompletableFuture<Unit> = getVersionManifest(id).thenApply { manifest ->
     PrintWriter(Files.newBufferedWriter(dir.resolve("build.gradle"), StandardCharsets.UTF_8)).use { out ->
         val libs = manifest["libraries"]!!.asJsonArray
         val byCondition = mutableMapOf<String, MutableSet<Dependency>>()
@@ -187,7 +187,7 @@ fun generateGradleBuild(id: String, dir: Path) = getVersionManifest(id).thenAppl
                 out.print("    if (")
                 out.print(condition)
                 out.println(") {")
-                indent = "    ";
+                indent = "    "
             }
             for (dep in set) {
                 out.print("    ")

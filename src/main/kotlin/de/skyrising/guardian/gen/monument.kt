@@ -229,7 +229,7 @@ fun gitCommit(dir: Path, date: LocalDateTime, config: GitConfig, vararg args: St
     return CompletableFuture.supplyAsync { p.waitFor() }
 }
 
-val threadLocalContext = ThreadLocal.withInitial { Context.default }
+val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context.default }
 
 data class Context(val executor: ExecutorService) {
     companion object {

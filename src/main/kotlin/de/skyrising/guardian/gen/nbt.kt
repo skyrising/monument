@@ -20,6 +20,7 @@ sealed class Tag {
         writer.write(sb.toString())
     }
 
+    @Suppress("MemberVisibilityCanBePrivate")
     companion object {
         const val END = 0
         const val BYTE = 1

@@ -9,6 +9,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributes
+import java.util.concurrent.CompletableFuture
 
 data class DownloadProgress(val length: Long, val progress: Long)
 
@@ -162,7 +163,7 @@ fun useResourceFileSystem(cls: Class<*>, fn: (Path) -> Unit) {
 
 private object Dummy
 
-fun extractGradle(id: String, out: Path) = supplyAsync {
+fun extractGradle(id: String, out: Path): CompletableFuture<Unit> = supplyAsync {
     useResourceFileSystem(Dummy::class.java) {
         copy(it.resolve("gradle_env"), out, StandardCopyOption.REPLACE_EXISTING)
     }
