@@ -19,7 +19,7 @@ dependencies {
         exclude("net.fabricmc", "cfr")
     }
     implementation("net.fabricmc:stitch:0.4.6+build.74")
-    implementation("org.benf:cfr:0.150")
+    implementation("org.benf:cfr:0.151")
 }
 
 application {
