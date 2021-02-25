@@ -2,6 +2,7 @@ package de.skyrising.guardian.gen
 
 import cuchaz.enigma.Enigma
 import cuchaz.enigma.ProgressListener
+import cuchaz.enigma.classprovider.ClasspathClassProvider
 import cuchaz.enigma.translation.mapping.EntryMapping
 import cuchaz.enigma.translation.mapping.serde.MappingFormat
 import cuchaz.enigma.translation.mapping.tree.EntryTree
@@ -110,7 +111,7 @@ fun mapJar(version: String, input: Path, mappings: EntryTree<EntryMapping>, prov
 fun mapJar(version: String, input: Path, output: Path, mappings: EntryTree<EntryMapping>) = supplyAsync {
     if (Files.exists(output)) return@supplyAsync
     val enigma = Enigma.create()
-    val project = enigma.openJar(input, ProgressListener.none())
+    val project = enigma.openJar(input, ClasspathClassProvider(), ProgressListener.none())
     project.setMappings(mappings)
     output(version, "Remapping jar...")
     val jar = project.exportRemappedJar(ProgressListener.none())

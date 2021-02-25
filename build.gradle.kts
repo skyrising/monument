@@ -15,7 +15,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
     implementation("com.google.code.gson:gson:2.8.6")
-    implementation("cuchaz:enigma:0.16.0+build.175:lib") {
+    implementation("cuchaz:enigma:0.23.1") {
         exclude("net.fabricmc", "cfr")
     }
     implementation("net.fabricmc:stitch:0.4.6+build.74")
