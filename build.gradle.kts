@@ -20,6 +20,7 @@ dependencies {
     }
     implementation("net.fabricmc:stitch:0.4.6+build.74")
     implementation("org.benf:cfr:0.151")
+    implementation("org.tomlj:tomlj:1.0.0")
 }
 
 application {

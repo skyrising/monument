@@ -15,6 +15,9 @@ inline fun <reified T> Gson.fromJson(reader: Reader): T {
 inline fun <reified T> Gson.fromJson(el: JsonElement): T {
     return this.fromJson(el, type<T>())
 }
+inline fun <reified T> Gson.fromJson(json: String): T {
+    return this.fromJson(json, type<T>())
+}
 
 inline fun <reified E : JsonElement, reified T> GsonBuilder.registerTypeAdapter(crossinline deserializer: (E, Type, JsonDeserializationContext) -> T): GsonBuilder {
     return this.registerTypeAdapter(type<T>(), JsonDeserializer { el, type, context ->
@@ -44,10 +47,6 @@ data class FilterConfig(val type: String?, val exclude: List<String>) : Function
         exclude.contains(version.id) -> false
         else -> true
     }
-}
-
-fun readConfig(reader: Reader) = supplyAsync {
-    GSON.fromJson<Config>(reader)
 }
 
 val GSON: Gson = GsonBuilder()

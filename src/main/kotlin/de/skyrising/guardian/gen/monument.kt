@@ -1,5 +1,7 @@
 package de.skyrising.guardian.gen
 
+import org.tomlj.Toml
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -28,6 +30,34 @@ fun main(args: Array<String>) {
     }
 }
 
+fun readConfig(): Config {
+    val configToml = Paths.get("config.toml")
+    val configJson = Paths.get("config.json")
+    val json = when {
+        Files.exists(configToml) -> {
+            val result = Toml.parse(configToml)
+            if (result.hasErrors()) {
+                System.err.println("Error reading config.toml")
+                for (e in result.errors()) System.err.println(e)
+                exitProcess(-1)
+            }
+            result.toJson()
+        }
+        Files.exists(configJson) -> try {
+            String(Files.readAllBytes(configJson))
+        } catch (e: IOException) {
+            System.err.println("Error reading config.json")
+            System.err.println(e)
+            exitProcess(-1)
+        }
+        else -> {
+            System.err.println("config.toml and config.json not found")
+            exitProcess(-1)
+        }
+    }
+    return GSON.fromJson(json)
+}
+
 fun update(branch: String = "master", action: String = "update") {
     val startTime = System.currentTimeMillis()
     val check = action == "check"
@@ -40,7 +70,7 @@ fun update(branch: String = "master", action: String = "update") {
         }
         Files.createDirectories(SOURCES_DIR)
     }
-    val config = readConfig(Files.newBufferedReader(Paths.get("config.json"))).join()
+    val config = readConfig()
     val branchConfig = config.branches[branch]
     if (branchConfig == null) {
         System.err.println("No definition for branch '$branch'")

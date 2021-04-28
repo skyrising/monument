@@ -7,4 +7,5 @@ output
 .idea
 /out/
 /logs/
-config.json
+/config.json
+/config.toml
