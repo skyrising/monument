@@ -196,6 +196,10 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
     }
     git(TEMP_REPO_DIR, "push", "--force", "--set-upstream", "guardian", branch).join()
     git(TEMP_REPO_DIR, "push", "--tags", "--force").join()
+    val gcLock = TEMP_REPO_DIR.resolve(".git/gc.log.lock")
+    while (Files.exists(gcLock)) {
+        Thread.sleep(100)
+    }
     rmrf(TEMP_REPO_DIR)
 }
 
