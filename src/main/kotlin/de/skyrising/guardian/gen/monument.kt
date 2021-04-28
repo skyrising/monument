@@ -6,7 +6,7 @@ import java.io.PrintStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.time.LocalDateTime
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -210,15 +210,15 @@ fun git(dir: Path, vararg args: String): CompletableFuture<Int> {
     return CompletableFuture.supplyAsync { p.waitFor() }
 }
 
-fun gitCommit(dir: Path, date: LocalDateTime, config: GitConfig, vararg args: String): CompletableFuture<Int> {
-    val command = mutableListOf("git", "commit")
+fun gitCommit(dir: Path, date: ZonedDateTime, config: GitConfig, vararg args: String): CompletableFuture<Int> {
+    val command = mutableListOf("git", "commit", "--no-gpg-sign")
     for (arg in args) command += arg
     val pb = ProcessBuilder(command)
     pb.redirectOutput(ProcessBuilder.Redirect.INHERIT)
     pb.redirectError(ProcessBuilder.Redirect.INHERIT)
     pb.directory(dir.toFile())
     val env = pb.environment()
-    val dateString = DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(date)
+    val dateString = DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(date)
     env["GIT_AUTHOR_DATE"] = dateString
     env["GIT_AUTHOR_NAME"] = config.author.name
     env["GIT_AUTHOR_EMAIL"] = config.author.email

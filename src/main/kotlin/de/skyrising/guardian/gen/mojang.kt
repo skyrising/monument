@@ -10,11 +10,10 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.LocalDateTime
+import java.time.ZonedDateTime
 import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.collections.LinkedHashMap
 
 val JARS_CLIENT_DIR: Path = JARS_DIR.resolve("client")
 val JARS_SERVER_DIR: Path = JARS_DIR.resolve("server")
@@ -35,7 +34,7 @@ val mcVersions: CompletableFuture<Map<String, VersionInfo>> by lazy { getVersion
 
 fun getVersionInfo(id: String): CompletableFuture<VersionInfo?> = mcVersions.thenApply { it[id] }
 
-data class VersionInfo(val id: String, val type: String, val url: URI, val time: LocalDateTime, val releaseTime: LocalDateTime) : Comparable<VersionInfo?> {
+data class VersionInfo(val id: String, val type: String, val url: URI, val time: ZonedDateTime, val releaseTime: ZonedDateTime) : Comparable<VersionInfo?> {
     override fun compareTo(other: VersionInfo?) = releaseTime.compareTo(other?.releaseTime)
 }
 

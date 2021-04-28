@@ -4,7 +4,7 @@ import com.google.gson.*
 import com.google.gson.reflect.TypeToken
 import java.io.Reader
 import java.lang.reflect.Type
-import java.time.LocalDateTime
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 inline fun <reified T> type(): Type = (object : TypeToken<T>() {}).type
@@ -88,7 +88,7 @@ val GSON: Gson = GsonBuilder()
             else -> throw IllegalArgumentException("Unknown decompiler '$s'")
         }
     }
-    .registerTypeAdapter<JsonPrimitive, LocalDateTime> { prim, _, _ ->
-        DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(prim.asString, LocalDateTime::from)
+    .registerTypeAdapter<JsonPrimitive, ZonedDateTime> { prim, _, _ ->
+        DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(prim.asString, ZonedDateTime::from)
     }
     .create()
