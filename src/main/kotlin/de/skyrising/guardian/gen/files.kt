@@ -6,7 +6,6 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
-import java.nio.charset.StandardCharsets
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.CompletableFuture
@@ -72,31 +71,78 @@ fun getJarFileSystem(jar: Path): FileSystem {
     return FileSystems.newFileSystem(fsUri, mapOf<String, Any>())
 }
 
-fun extractResources(jar: Path, out: Path, processStructures: Boolean) = supplyAsync {
-    getJarFileSystem(jar).use { fs ->
-        val root = fs.getPath("/")
-        val structurePath = Paths.get("data", "minecraft", "structures")
-        Files.walk(root).forEach { path ->
-            if (Files.isDirectory(path) || path.fileName.toString().endsWith(".class")) return@forEach
-            val relative = root.relativize(path)
-            val fileOut = out.resolve(relative.toString())
-            Files.createDirectories(fileOut.parent)
-            if (processStructures && relative.startsWith(structurePath.toString()) && relative.fileName.toString().endsWith(".nbt")) {
-                val nbtName = relative.fileName.toString()
-                val snbtName = nbtName.substring(0, nbtName.length - 4) + ".snbt"
-                val snbtOut = fileOut.resolveSibling(snbtName)
+interface PostProcessor {
+    fun matches(path: Path): Boolean
+    fun process(path: Path, content: ByteArray): Pair<Path, ByteArray>
+}
+
+val STRUCTURE_PROCESSOR = object : PostProcessor {
+    private val structurePath = Paths.get("data", "minecraft", "structures")
+
+    override fun matches(path: Path) = path.startsWith(structurePath.toString()) && path.fileName.toString().endsWith(".nbt")
+
+    override fun process(path: Path, content: ByteArray): Pair<Path, ByteArray> {
+        val nbtName = path.fileName.toString()
+        val snbtName = nbtName.substring(0, nbtName.length - 4) + ".snbt"
+        val snbtOut = path.resolveSibling(snbtName)
+        val tag = Tag.readCompressed(Files.newInputStream(path))
+        convertStructure(tag)
+        return Pair(snbtOut, tag.toSnbt().toByteArray())
+    }
+}
+
+fun postProcessFile(path: Path, relative: Path, postProcessors: List<PostProcessor>): Pair<Path, ByteArray?> {
+    var outRelative = relative
+    var content: ByteArray? = null
+    val appliedPostProcessors = mutableSetOf<PostProcessor>()
+    outer@while (appliedPostProcessors.size < postProcessors.size) {
+        for (processor in postProcessors) {
+            if (processor in appliedPostProcessors) continue
+            if (processor.matches(outRelative)) {
+                if (content == null) content = Files.readAllBytes(path)
                 try {
-                    val tag = Tag.readCompressed(Files.newInputStream(path))
-                    convertStructure(tag)
-                    Files.newBufferedWriter(snbtOut, StandardCharsets.UTF_8).use {
-                        tag.writeSnbt(it)
-                    }
-                    return@forEach
+                    val result = processor.process(outRelative, content!!)
+                    outRelative = result.first
+                    content = result.second
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
+                appliedPostProcessors.add(processor)
+                continue@outer
             }
-            Files.copy(path, fileOut, StandardCopyOption.REPLACE_EXISTING)
+        }
+        break
+    }
+    return Pair(outRelative, content)
+}
+
+fun postProcessSources(srcDir: Path, postProcessors: List<PostProcessor>) = supplyAsync {
+    Files.walk(srcDir).forEach { path ->
+        if (Files.isDirectory(path)) return@forEach
+        val relative = srcDir.relativize(path)
+        val (outRelative, content) = postProcessFile(path, relative, postProcessors)
+        val fileOut = srcDir.resolve(outRelative.toString())
+        if (content != null) {
+            if (!fileOut.equals(path)) Files.delete(path)
+            Files.write(fileOut, content)
+        }
+    }
+}
+
+fun extractResources(jar: Path, out: Path, postProcessors: List<PostProcessor>) = supplyAsync {
+    getJarFileSystem(jar).use { fs ->
+        val root = fs.getPath("/")
+        Files.walk(root).forEach { path ->
+            if (Files.isDirectory(path) || path.fileName.toString().endsWith(".class")) return@forEach
+            val relative = root.relativize(path)
+            val (outRelative, content) = postProcessFile(path, relative, postProcessors)
+            val fileOut = out.resolve(outRelative.toString())
+            Files.createDirectories(fileOut.parent)
+            if (content == null) {
+                Files.copy(path, fileOut, StandardCopyOption.REPLACE_EXISTING)
+            } else {
+                Files.write(fileOut, content)
+            }
         }
     }
 }

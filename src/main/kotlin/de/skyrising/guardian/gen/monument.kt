@@ -81,7 +81,7 @@ fun update(branch: String = "master", action: String = "update") {
         System.err.println("No definition for source '${branchConfig.source}'")
         return
     }
-    val (mappings, decompiler, processStructures) = sourceConfig
+    val (mappings, decompiler, postProcessors) = sourceConfig
 
     val versions = mcVersions.join()
     fun getVersion(id: String?): VersionInfo? {
@@ -112,7 +112,7 @@ fun update(branch: String = "master", action: String = "update") {
     if (missing.isNotEmpty()) {
         val futures = mutableListOf<CompletableFuture<Path>>()
         enableOutput()
-        for (version in missing) futures.add(genSources(version.id, mappings, decompiler, processStructures))
+        for (version in missing) futures.add(genSources(version.id, mappings, decompiler, postProcessors))
         val all = CompletableFuture.allOf(*futures.toTypedArray())
             sysOut.println("Waiting for sources to generate")
         var lines = 0
@@ -167,14 +167,14 @@ fun getMappedMergedJar(version: String, provider: MappingProvider): CompletableF
     }
 }
 
-fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, processStructures: Boolean): CompletableFuture<Path> {
+fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
     val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version)
     Files.createDirectories(out)
     val resOut = out.resolve("src").resolve("main").resolve("resources")
     val javaOut = out.resolve("src").resolve("main").resolve("java")
     return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
-        extractResources(jar, resOut, processStructures)
+        extractResources(jar, resOut, postProcessors)
     }.thenCompose {
         val metaInf = resOut.resolve("META-INF")
         if (Files.exists(metaInf)) rmrf(metaInf)
@@ -188,6 +188,8 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
             output(version, "Decompiling with ${decompiler.name}")
             decompiler.decompile(version, jar, javaOut, libs)
         }
+    }.thenCompose {
+        postProcessSources(javaOut, postProcessors)
     }.thenCompose {
         extractGradle(version, out)
     }.thenApply {

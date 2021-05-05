@@ -3,10 +3,6 @@ package de.skyrising.guardian.gen
 import java.io.*
 import java.util.*
 import java.util.zip.GZIPInputStream
-import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
-import kotlin.collections.HashSet
-import kotlin.collections.LinkedHashMap
 import kotlin.reflect.KClass
 
 
@@ -15,9 +11,13 @@ sealed class Tag {
     abstract fun toString(sb: StringBuilder, depth: Int, path: LinkedList<String>, indentString: String)
 
     fun writeSnbt(writer: Writer) {
+        writer.write(toSnbt())
+    }
+
+    fun toSnbt(): String {
         val sb = StringBuilder()
         toString(sb, 0, LinkedList(), "    ")
-        writer.write(sb.toString())
+        return sb.toString()
     }
 
     @Suppress("MemberVisibilityCanBePrivate")
