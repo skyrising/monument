@@ -91,6 +91,51 @@ val STRUCTURE_PROCESSOR = object : PostProcessor {
     }
 }
 
+val SOURCE_PROCESSOR = object : PostProcessor {
+    override fun matches(path: Path) = path.fileName.toString().endsWith(".java")
+
+    override fun process(path: Path, content: ByteArray): Pair<Path, ByteArray> {
+        val source = String(content).split("\n").toMutableList()
+        var startingComment = source[0].startsWith("/*")
+        var comment = false
+        val it = source.listIterator()
+        while (it.hasNext()) {
+            val line = it.next()
+            if (startingComment) {
+                val index = line.indexOf("*/")
+                when {
+                    index < 0 -> it.remove()
+                    index == line.length - 2 -> {
+                        it.remove()
+                        startingComment = false
+                    }
+                    else -> {
+                        it.set(line.substring(index + 2))
+                        startingComment = false
+                    }
+                }
+                continue
+            }
+            if (line.contains("/*") && !line.contains("*/")) {
+                comment = true
+                continue
+            }
+            if (comment && line.contains("at ")) {
+                if (line.contains("de.skyrising.guardian.gen.")) {
+                    it.remove()
+                } else {
+                    it.set(line.replace(Regex("\\(.*\\.(java|kt):\\d+\\)"), ""))
+                }
+            }
+            if (line.contains("*/")) {
+                comment = false
+                continue
+            }
+        }
+        return Pair(path, source.joinToString("\n", postfix="\n").toByteArray())
+    }
+}
+
 fun postProcessFile(path: Path, relative: Path, postProcessors: List<PostProcessor>): Pair<Path, ByteArray?> {
     var outRelative = relative
     var content: ByteArray? = null

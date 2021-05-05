@@ -75,6 +75,8 @@ val GSON: Gson = GsonBuilder()
         val postProcessors = mutableListOf<PostProcessor>()
         val processStructures = obj["processStructures", context] ?: true
         if (processStructures) postProcessors.add(STRUCTURE_PROCESSOR)
+        val processSources = obj["processSources", context] ?: true
+        if (processSources) postProcessors.add(SOURCE_PROCESSOR)
         SourceConfig(mappings, decompiler, postProcessors)
     }
     .registerTypeAdapter<JsonPrimitive, MappingProvider> { prim, _, _ ->
