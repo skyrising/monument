@@ -1,6 +1,5 @@
 package de.skyrising.guardian.gen
 
-import net.fabricmc.stitch.merge.JarMerger
 import java.io.BufferedInputStream
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -227,15 +226,6 @@ fun tagToBlockStateString(tag: CompoundTag): String {
         sb.append(k).append(':').append(v.value)
     }
     return sb.append('}').toString()
-}
-
-fun mergeJars(client: Path, server: Path, merged: Path) = supplyAsync {
-    Files.createDirectories(merged.parent)
-    JarMerger(client.toFile(), server.toFile(), merged.toFile()).use { merger ->
-        merger.enableSnowmanRemoval()
-        println("Merging jars...")
-        merger.merge()
-    }
 }
 
 fun useResourceFileSystem(cls: Class<*>, fn: (Path) -> Unit) {
