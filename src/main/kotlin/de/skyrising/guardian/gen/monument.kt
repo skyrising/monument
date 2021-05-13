@@ -8,7 +8,7 @@ import java.nio.file.Paths
 import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.concurrent.ForkJoinPool
 import java.util.stream.Collectors
 import kotlin.system.exitProcess
 
@@ -117,18 +117,20 @@ fun update(branch: String = "master", action: String = "update") {
             sysOut.println("Waiting for sources to generate")
         var lines = 0
         while (!all.isDone) {
-            if (lines > 0) sysOut.print("\u001b[${lines}A\u001b[J")
-            lines = 0
             val listedOutputs = linkedSetOf<String>()
             for (key in persistentOutputs) {
                 val line = outputs[key]
                 if (line != null) listedOutputs.add("$key: $line")
             }
-            for ((thread, key) in outputsByThread) {
-                if (!thread.isAlive) continue
-                val line = outputs[key]
-                if (line != null) listedOutputs.add("$key: $line")
+            synchronized(outputsByThread) {
+                for ((thread, key) in outputsByThread) {
+                    if (!thread.isAlive) continue
+                    val line = outputs[key]
+                    if (line != null) listedOutputs.add("$key: $line")
+                }
             }
+            if (lines > 0) sysOut.print("\u001b[${lines}A\u001b[J")
+            lines = 0
             for (line in listedOutputs) {
                 lines++
                 sysOut.println(line)
@@ -202,6 +204,6 @@ val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context
 
 data class Context(val executor: ExecutorService) {
     companion object {
-        val default = Context(Executors.newWorkStealingPool())
+        val default = Context(ForkJoinPool.commonPool())
     }
 }
