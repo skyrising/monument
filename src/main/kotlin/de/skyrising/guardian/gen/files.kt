@@ -8,10 +8,17 @@ import java.net.URL
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 
 data class DownloadProgress(val length: Long, val progress: Long)
 
-fun download(url: URL, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = supplyAsync {
+private val DOWNLOADS = ConcurrentHashMap<URL, CompletableFuture<Unit>>()
+
+fun download(url: URL, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = DOWNLOADS.computeIfAbsent(url) {
+    startDownload(it, file, listener)
+}
+
+private fun startDownload(url: URL, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = supplyAsync {
     if (Files.exists(file)) return@supplyAsync
     println("Downloading $url")
     Files.createDirectories(file.parent)
@@ -240,6 +247,18 @@ fun useResourceFileSystem(cls: Class<*>, fn: (Path) -> Unit) {
         }
         else -> throw IllegalStateException("Cannot get file system for scheme '${uri.scheme}'")
     }
+}
+
+fun getMavenArtifact(mvnArtifact: MavenArtifact): CompletableFuture<URL> {
+    val artifact = mvnArtifact.artifact
+    val id = artifact.id
+    val version = artifact.version
+    val classifier = artifact.classifier?.let { "-$it" } ?: ""
+    val path = "${artifact.group.replace('.', '/')}/$id/$version/$id-$version$classifier.jar"
+    val filePath = JARS_DIR.resolve("libraries").resolve(path)
+    if (Files.exists(filePath)) return CompletableFuture.completedFuture(filePath.toUri().toURL())
+    val url = mvnArtifact.mavenUrl.resolve(path).toURL()
+    return download(url, filePath).thenApply { filePath.toUri().toURL() }
 }
 
 private object Dummy

@@ -1,20 +1,28 @@
 [git]
-origin = '...'
+origin = '...' # The url of the origin remote saved in the local git repo
 author = { name = 'Mojang', email = '...' }
 committer = { name = 'Mojang', email = '...' }
 
+# Specify custom versions of decompilers
+#[decompilers]
+#cfr = 'org.benf:cfr:0.151'
+
+# Define a source set
 [sources.'mojang/cfr']
 mappings = 'mojang'
 decompiler = 'cfr'
 
+# Define a branch based on the mojang/cfr, excluding the infinity snapshot
 [branches.master]
 source = 'mojang/cfr'
 filter.exclude = ['20w14infinite']
 
+# Define a branch based on the mojang/cfr, ending with the infinity snapshot
 [branches.20w14infinite]
 source = 'mojang/cfr'
 head = '20w14infinite'
 
+# Define a branch based on the mojang/cfr, starting from 20w15a and ending with 20w16a, this will have 2 commits
 [branches.test]
 source = 'mojang/cfr'
 base = '20w15a'

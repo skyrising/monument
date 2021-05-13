@@ -19,7 +19,6 @@ dependencies {
         exclude("net.fabricmc", "cfr")
     }
     implementation("net.fabricmc:stitch:0.6.1")
-    implementation("org.benf:cfr:0.151")
     implementation("org.tomlj:tomlj:1.0.0")
     implementation("org.ow2.asm:asm:9.1")
     implementation("org.ow2.asm:asm-tree:9.1")

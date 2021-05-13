@@ -2,6 +2,7 @@ package de.skyrising.guardian.gen
 
 import org.tomlj.Toml
 import java.io.IOException
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -12,6 +13,10 @@ import java.util.concurrent.ForkJoinPool
 import java.util.stream.Collectors
 import kotlin.system.exitProcess
 
+val DEFAULT_MAVEN_URL = URI("https://repo1.maven.org/maven2/")
+val DEFAULT_DECOMPILER_MAP = mapOf<Decompiler, MavenArtifact>(
+    Decompiler.CFR to MavenArtifact(DEFAULT_MAVEN_URL, ArtifactSpec("org.benf", "cfr", "0.151"))
+)
 
 val OUTPUT_DIR: Path = Paths.get(System.getenv("MONUMENT_OUTPUT") ?: "output")
 val REPO_DIR: Path = OUTPUT_DIR.resolve("guardian.git")
@@ -71,6 +76,11 @@ fun update(branch: String = "master", action: String = "update") {
         Files.createDirectories(SOURCES_DIR)
     }
     val config = readConfig()
+    val decompilerMap = HashMap(DEFAULT_DECOMPILER_MAP)
+    if (config.decompilers != null) {
+        decompilerMap.putAll(config.decompilers.map)
+    }
+
     val branchConfig = config.branches[branch]
     if (branchConfig == null) {
         System.err.println("No definition for branch '$branch'")
@@ -112,7 +122,7 @@ fun update(branch: String = "master", action: String = "update") {
     if (missing.isNotEmpty()) {
         val futures = mutableListOf<CompletableFuture<Path>>()
         enableOutput()
-        for (version in missing) futures.add(genSources(version.id, mappings, decompiler, postProcessors))
+        for (version in missing) futures.add(genSources(version.id, mappings, decompiler, decompilerMap, postProcessors))
         val all = CompletableFuture.allOf(*futures.toTypedArray())
             sysOut.println("Waiting for sources to generate")
         var lines = 0
@@ -169,7 +179,7 @@ fun getMappedMergedJar(version: String, provider: MappingProvider): CompletableF
     }
 }
 
-fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
+fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, MavenArtifact>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
     val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version)
     Files.createDirectories(out)
     val resOut = out.resolve("src").resolve("main").resolve("resources")
@@ -188,7 +198,8 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
             if (Files.exists(javaOut)) rmrf(javaOut)
             Files.createDirectories(javaOut)
             output(version, "Decompiling with ${decompiler.name}")
-            decompiler.decompile(version, jar, javaOut, libs)
+            val artifact = decompilerMap[decompiler]
+            decompiler.decompile(artifact, version, jar, javaOut, libs)
         }
     }.thenCompose {
         postProcessSources(javaOut, postProcessors)

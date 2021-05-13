@@ -4,6 +4,7 @@ import com.google.gson.*
 import com.google.gson.reflect.TypeToken
 import java.io.Reader
 import java.lang.reflect.Type
+import java.net.URI
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -34,7 +35,7 @@ fun JsonObject.require(key: String) = this[key] ?: throw IllegalArgumentExceptio
 inline fun <reified T> JsonObject.require(key: String, context: JsonDeserializationContext) = context.deserialize<T>(require(key))
 inline operator fun <reified T> JsonObject.get(key: String, context: JsonDeserializationContext) = get(key)?.let { context.deserialize<T>(it) }
 
-data class Config(val git: GitConfig, val sources: SourcesConfig, val branches: BranchesConfig)
+data class Config(val git: GitConfig, val sources: SourcesConfig, val branches: BranchesConfig, val decompilers: DecompilerMap?)
 data class GitConfig(val origin: String, val author: GitPerson, val committer: GitPerson)
 data class GitPerson(val name: String, val email: String)
 typealias SourcesConfig = Map<String, SourceConfig>
@@ -48,6 +49,9 @@ data class FilterConfig(val type: String?, val exclude: List<String>) : Function
         else -> true
     }
 }
+data class ArtifactSpec(val group: String, val id: String, val version: String, val classifier: String? = null)
+data class MavenArtifact(val mavenUrl: URI, val artifact: ArtifactSpec)
+data class DecompilerMap(val map: Map<Decompiler, MavenArtifact>)
 
 val GSON: Gson = GsonBuilder()
     .registerTypeAdapter<JsonObject, GitConfig> { obj, _, context ->
@@ -79,6 +83,23 @@ val GSON: Gson = GsonBuilder()
         if (processSources) postProcessors.add(SOURCE_PROCESSOR)
         SourceConfig(mappings, decompiler, postProcessors)
     }
+    .registerTypeAdapter<JsonObject, DecompilerMap> { obj, _, context ->
+        val map = mutableMapOf<Decompiler, MavenArtifact>()
+        for (key in obj.keySet()) {
+            val decompiler = getDecompiler(key)
+            val value = obj[key]
+            val artifact = if (value.isJsonObject) {
+                context.deserialize(value)
+            } else {
+                MavenArtifact(DEFAULT_MAVEN_URL, context.deserialize(value))
+            }
+            map[decompiler] = artifact
+        }
+        DecompilerMap(map)
+    }
+    .registerTypeAdapter<JsonObject, MavenArtifact> { obj, _, context ->
+        MavenArtifact(URI(obj.require("url", context)), obj.require("artifact", context))
+    }
     .registerTypeAdapter<JsonPrimitive, MappingProvider> { prim, _, _ ->
         when (val s = prim.asString) {
             "mojang" -> MappingProvider.MOJANG
@@ -86,12 +107,22 @@ val GSON: Gson = GsonBuilder()
         }
     }
     .registerTypeAdapter<JsonPrimitive, Decompiler> { prim, _, _ ->
-        when (val s = prim.asString) {
-            "cfr" -> Decompiler.CFR
-            else -> throw IllegalArgumentException("Unknown decompiler '$s'")
+        getDecompiler(prim.asString)
+    }
+    .registerTypeAdapter<JsonPrimitive, ArtifactSpec> { prim, _, _ ->
+        val parts = prim.asString.split(":")
+        if (parts.size == 4) {
+            return@registerTypeAdapter ArtifactSpec(parts[0], parts[1], parts[2], parts[3])
         }
+        if (parts.size != 3) throw IllegalArgumentException("Expected group:id:version, got '${prim.asString}'")
+        ArtifactSpec(parts[0], parts[1], parts[2])
     }
     .registerTypeAdapter<JsonPrimitive, ZonedDateTime> { prim, _, _ ->
         DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(prim.asString, ZonedDateTime::from)
     }
     .create()
+
+fun getDecompiler(id: String) = when (id) {
+    "cfr" -> Decompiler.CFR
+    else -> throw IllegalArgumentException("Unknown decompiler '$id'")
+}
