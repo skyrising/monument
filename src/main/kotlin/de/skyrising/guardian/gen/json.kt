@@ -91,7 +91,7 @@ val GSON: Gson = GsonBuilder()
             val artifact = if (value.isJsonObject) {
                 context.deserialize(value)
             } else {
-                MavenArtifact(DEFAULT_MAVEN_URL, context.deserialize(value))
+                MavenArtifact(MAVEN_CENTRAL, context.deserialize(value))
             }
             map[decompiler] = artifact
         }
@@ -124,5 +124,9 @@ val GSON: Gson = GsonBuilder()
 
 fun getDecompiler(id: String) = when (id) {
     "cfr" -> Decompiler.CFR
+    "fernflower" -> Decompiler.FERNFLOWER
+    "forgeflower" -> Decompiler.FORGEFLOWER
+    "fabriflower" -> Decompiler.FABRIFLOWER
+    "quiltflower" -> Decompiler.QUILTFLOWER
     else -> throw IllegalArgumentException("Unknown decompiler '$id'")
 }

@@ -13,9 +13,15 @@ import java.util.concurrent.ForkJoinPool
 import java.util.stream.Collectors
 import kotlin.system.exitProcess
 
-val DEFAULT_MAVEN_URL = URI("https://repo1.maven.org/maven2/")
+val MAVEN_CENTRAL = URI("https://repo1.maven.org/maven2/")
+val FORGE_MAVEN = URI("https://maven.minecraftforge.net/")
+val FABRIC_MAVEN = URI("https://maven.fabricmc.net/")
+val QUILT_MAVEN = URI("https://maven.quiltmc.org/repository/release/")
 val DEFAULT_DECOMPILER_MAP = mapOf<Decompiler, MavenArtifact>(
-    Decompiler.CFR to MavenArtifact(DEFAULT_MAVEN_URL, ArtifactSpec("org.benf", "cfr", "0.151"))
+    Decompiler.CFR to MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.benf", "cfr", "0.151")),
+    Decompiler.FORGEFLOWER to MavenArtifact(FORGE_MAVEN, ArtifactSpec("net.minecraftforge", "forgeflower", "1.5.498.5")),
+    Decompiler.FABRIFLOWER to MavenArtifact(FABRIC_MAVEN, ArtifactSpec("net.fabricmc", "fabric-fernflower", "1.4.0")),
+    Decompiler.QUILTFLOWER to MavenArtifact(QUILT_MAVEN, ArtifactSpec("org.quiltmc", "quiltflower", "1.3.0"))
 )
 
 val OUTPUT_DIR: Path = Paths.get(System.getenv("MONUMENT_OUTPUT") ?: "output")
@@ -113,7 +119,8 @@ fun update(branch: String = "master", action: String = "update") {
     }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
     println("${spellVersions(supported.size)} supported by '${mappings.name}' mappings")
     val missing = supported.parallelStream().filter {
-        Files.notExists(getSourcePath(it.id, mappings, decompiler))
+        val srcPath = getSourcePath(it.id, mappings, decompiler)
+        Files.notExists(srcPath) || Files.exists(srcPath.resolve("src/main/java-tmp"))
     }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
     println("Source code for ${spellVersions(missing.size)} missing")
 
@@ -182,8 +189,10 @@ fun getMappedMergedJar(version: String, provider: MappingProvider): CompletableF
 fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, MavenArtifact>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
     val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version)
     Files.createDirectories(out)
-    val resOut = out.resolve("src").resolve("main").resolve("resources")
-    val javaOut = out.resolve("src").resolve("main").resolve("java")
+    val resOut = out.resolve("src/main/resources")
+    val javaOut = out.resolve("src/main/java")
+    val tmpOut = out.resolve("src/main/java-tmp")
+    Files.createDirectories(tmpOut)
     return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
         extractResources(jar, resOut, postProcessors)
@@ -195,17 +204,16 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
         CompletableFuture.allOf(jarFuture, libsFuture).thenCompose {
             val jar = jarFuture.get()
             val libs = libsFuture.get()
-            if (Files.exists(javaOut)) rmrf(javaOut)
-            Files.createDirectories(javaOut)
             output(version, "Decompiling with ${decompiler.name}")
             val artifact = decompilerMap[decompiler]
-            decompiler.decompile(artifact, version, jar, javaOut, libs)
+            decompiler.decompile(artifact, version, jar, tmpOut, libs)
         }
     }.thenCompose {
-        postProcessSources(javaOut, postProcessors)
+        postProcessSources(it, javaOut, postProcessors)
     }.thenCompose {
         extractGradle(version, out)
     }.thenApply {
+        rmrf(tmpOut)
         closeOutput(version)
         out
     }

@@ -26,7 +26,7 @@ fun enableOutput() {
     fun outStream(key: String) = PrintStream(object : OutputStream() {
         private val line = StringBuilder()
         override fun write(b: Int) {
-            val k = outputToKey.get() ?: key
+            val k = outputToKey.get() ?: Thread.currentThread().name
             getOutputPrintStream(k).write(b)
             if (b == '\n'.toInt()) {
                 outputs[k] = line.toString()

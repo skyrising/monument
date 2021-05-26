@@ -167,16 +167,23 @@ fun postProcessFile(path: Path, relative: Path, postProcessors: List<PostProcess
     return Pair(outRelative, content)
 }
 
-fun postProcessSources(srcDir: Path, postProcessors: List<PostProcessor>) = supplyAsync {
-    Files.walk(srcDir).forEach { path ->
+fun postProcessSources(srcTmpDir: Path, srcDir: Path, postProcessors: List<PostProcessor>) = supplyAsync {
+    if (Files.exists(srcDir)) rmrf(srcDir)
+    Files.createDirectories(srcDir)
+    Files.walk(srcTmpDir).forEach { path ->
         if (Files.isDirectory(path)) return@forEach
-        val relative = srcDir.relativize(path)
+        val relative = srcTmpDir.relativize(path)
         val (outRelative, content) = postProcessFile(path, relative, postProcessors)
         val fileOut = srcDir.resolve(outRelative.toString())
+        Files.createDirectories(fileOut.parent)
         if (content != null) {
-            if (!fileOut.equals(path)) Files.delete(path)
             Files.write(fileOut, content)
+        } else {
+            Files.copy(path, fileOut)
         }
+    }
+    if (srcTmpDir.fileSystem != FileSystems.getDefault()) {
+        srcTmpDir.fileSystem.close()
     }
 }
 
