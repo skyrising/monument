@@ -98,9 +98,11 @@ fun getMappings(provider: MappingProvider, version: String, target: MappingTarge
 
 fun mergeMappings(version: String, vararg mappings: EntryTree<EntryMapping>): EntryTree<EntryMapping> {
     output(version, "Merging mappings...")
-    val merged = HashEntryTree<EntryMapping>()
-    for (mapping in mappings) for (entry in mapping) merged.insert(entry.entry, entry.value)
-    return merged
+    return Timer(version, "mergingMappings").use {
+        val merged = HashEntryTree<EntryMapping>()
+        for (mapping in mappings) for (entry in mapping) merged.insert(entry.entry, entry.value)
+        merged
+    }
 }
 
 fun mapJar(version: String, input: Path, mappings: EntryTree<EntryMapping>, provider: String): CompletableFuture<Path> {
@@ -114,7 +116,11 @@ fun mapJar(version: String, input: Path, output: Path, mappings: EntryTree<Entry
     val project = enigma.openJar(input, ClasspathClassProvider(), ProgressListener.none())
     project.setMappings(mappings)
     output(version, "Remapping jar...")
-    val jar = project.exportRemappedJar(VersionedProgressListener(version, "Deobfuscating"))
-    Files.createDirectories(output.parent)
-    jar.write(output, VersionedProgressListener(version, "Writing deobfuscated jar"))
+    val jar = Timer(version, "remapJar").use {
+        project.exportRemappedJar(VersionedProgressListener(version, "Deobfuscating"))
+    }
+    Timer(version, "writeRemappedJar").use {
+        Files.createDirectories(output.parent)
+        jar.write(output, VersionedProgressListener(version, "Writing deobfuscated jar"))
+    }
 }

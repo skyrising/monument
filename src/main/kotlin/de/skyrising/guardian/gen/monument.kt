@@ -171,6 +171,7 @@ fun update(branch: String = "master", action: String = "update") {
     createBranch(branch, config.git, history)
     val time = (System.currentTimeMillis() - startTime) / 1000.0
     println(String.format(Locale.ROOT, "Done in %.3fs", time))
+    dumpTimers(System.out)
 }
 
 fun spellVersions(count: Int) = if (count == 1) "$count version" else "$count versions"
@@ -195,7 +196,7 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
     Files.createDirectories(tmpOut)
     return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
-        extractResources(jar, resOut, postProcessors)
+        time(version, "extractResources", extractResources(jar, resOut, postProcessors))
     }.thenCompose {
         val metaInf = resOut.resolve("META-INF")
         if (Files.exists(metaInf)) rmrf(metaInf)
@@ -206,10 +207,10 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
             val libs = libsFuture.get()
             output(version, "Decompiling with ${decompiler.name}")
             val artifact = decompilerMap[decompiler]
-            decompiler.decompile(artifact, version, jar, tmpOut, libs)
+            time(version, "decompile", decompiler.decompile(artifact, version, jar, tmpOut, libs))
         }
     }.thenCompose {
-        postProcessSources(it, javaOut, postProcessors)
+        time(version, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
     }.thenCompose {
         extractGradle(version, out)
     }.thenApply {

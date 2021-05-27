@@ -15,19 +15,21 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
     git(TEMP_REPO_DIR, "remote", "add", "guardian", REPO_DIR.toAbsolutePath().toString()).join()
     git(TEMP_REPO_DIR, "checkout", "-b", branch).join()
     for (commit in history) {
-        val destFiles = mutableMapOf<Path, Path>()
-        Files.list(commit.source).forEach {
-            val dest = TEMP_REPO_DIR.resolve(commit.source.relativize(it))
-            destFiles[dest] = it
-            Files.move(it, dest)
+        Timer(commit.version.id, "commit").use {
+            val destFiles = mutableMapOf<Path, Path>()
+            Files.list(commit.source).forEach {
+                val dest = TEMP_REPO_DIR.resolve(commit.source.relativize(it))
+                destFiles[dest] = it
+                Files.move(it, dest)
+            }
+            println("${commit.version.id}: ${commit.source.toAbsolutePath()}")
+            git(TEMP_REPO_DIR, "add", ".").join()
+            gitCommit(TEMP_REPO_DIR, commit.version.releaseTime, config, "-m", commit.version.id).join()
+            val tag = if (branch == "master") commit.version.id else "$branch-${commit.version.id}"
+            git(TEMP_REPO_DIR, "tag", tag).join()
+            // for (repoFile in destFiles) rmrf(repoFile)
+            for ((a, b) in destFiles) Files.move(a, b)
         }
-        println("${commit.version.id}: ${commit.source.toAbsolutePath()}")
-        git(TEMP_REPO_DIR, "add", ".").join()
-        gitCommit(TEMP_REPO_DIR, commit.version.releaseTime, config, "-m", commit.version.id).join()
-        val tag = if (branch == "master") commit.version.id else "$branch-${commit.version.id}"
-        git(TEMP_REPO_DIR, "tag", tag).join()
-        // for (repoFile in destFiles) rmrf(repoFile)
-        for ((a, b) in destFiles) Files.move(a, b)
     }
     git(TEMP_REPO_DIR, "push", "--force", "--set-upstream", "guardian", branch).join()
     git(TEMP_REPO_DIR, "push", "--tags", "--force").join()
