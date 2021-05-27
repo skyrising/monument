@@ -122,7 +122,7 @@ fun getJar(id: String, target: MappingTarget): CompletableFuture<Path> {
         val client = getJar(id, MappingTarget.CLIENT)
         val server = getJar(id, MappingTarget.SERVER)
         return deduplicate(inProgress, merged, CompletableFuture.allOf(client, server).thenCompose {
-            mergeJars(client.get(), server.get(), merged)
+            mergeJars(id, client.get(), server.get(), merged)
         }.thenApply {
             merged
         })

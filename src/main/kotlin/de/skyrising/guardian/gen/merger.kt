@@ -17,6 +17,7 @@
 
 package de.skyrising.guardian.gen
 
+import cuchaz.enigma.ProgressListener
 import net.fabricmc.stitch.util.StitchUtil
 import net.fabricmc.stitch.util.StitchUtil.FileSystemDelegate
 import net.fabricmc.stitch.util.SyntheticParameterClassVisitor
@@ -24,21 +25,20 @@ import org.objectweb.asm.*
 import org.objectweb.asm.tree.*
 import java.io.File
 import java.io.IOException
-import java.nio.charset.Charset
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributeView
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.*
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.stream.Collectors
+import java.util.concurrent.Callable
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
-
-fun mergeJars(client: Path, server: Path, merged: Path) = supplyAsync {
+fun mergeJars(version: String, client: Path, server: Path, merged: Path) = supplyAsync {
     Files.createDirectories(merged.parent)
     JarMerger(client.toFile(), server.toFile(), merged.toFile()).use { merger ->
         merger.enableSnowmanRemoval()
-        println("Merging jars...")
+        merger.setProgressListener(VersionedProgressListener(version, "Merging jars..."))
         merger.merge()
     }
 }
@@ -47,13 +47,14 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
     AutoCloseable {
     inner class Entry(val path: Path, val metadata: BasicFileAttributes, val data: ByteArray?)
 
+    private var progressListener: ProgressListener? = null
     private var inputClientFs: FileSystemDelegate? = null
     private var inputServerFs: FileSystemDelegate? = null
     private val outputFs: FileSystemDelegate
     private val inputClient: Path
     private val inputServer: Path
-    private val entriesClient: MutableMap<String, Entry?>
-    private val entriesServer: MutableMap<String, Entry?>
+    private lateinit var entriesClient: Map<String, Entry?>
+    private lateinit var entriesServer: Map<String, Entry?>
     private val entriesAll: MutableSet<String>
     private var removeSnowmen = false
     private var offsetSyntheticsParams = false
@@ -65,6 +66,10 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
         offsetSyntheticsParams = true
     }
 
+    fun setProgressListener(listener: ProgressListener) {
+        this.progressListener = listener
+    }
+
     @Throws(IOException::class)
     override fun close() {
         inputClientFs!!.close()
@@ -72,137 +77,130 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
         outputFs.close()
     }
 
-    private fun readToMap(map: MutableMap<String, Entry?>, input: Path, isServer: Boolean) {
-        try {
-            Files.walkFileTree(input, object : SimpleFileVisitor<Path>() {
-                @Throws(IOException::class)
-                override fun visitFile(path: Path, attr: BasicFileAttributes): FileVisitResult {
-                    if (attr.isDirectory) {
-                        return FileVisitResult.CONTINUE
-                    }
-                    if (!path.fileName.toString().endsWith(".class")) {
-                        if (path.toString() == "/META-INF/MANIFEST.MF") {
-                            map["META-INF/MANIFEST.MF"] = Entry(
-                                path, attr,
-                                "Manifest-Version: 1.0\nMain-Class: net.minecraft.client.Main\n".toByteArray(
-                                    Charset.forName(
-                                        "UTF-8"
-                                    )
-                                )
-                            )
-                        } else {
-                            if (path.toString().startsWith("/META-INF/")) {
-                                if (path.toString().endsWith(".SF") || path.toString().endsWith(".RSA")) {
-                                    return FileVisitResult.CONTINUE
-                                }
-                            }
-                            map[path.toString().substring(1)] = Entry(path, attr, null)
-                        }
-                        return FileVisitResult.CONTINUE
-                    }
-                    val output = Files.readAllBytes(path)
-                    map[path.toString().substring(1)] = Entry(path, attr, output)
-                    return FileVisitResult.CONTINUE
-                }
-            })
-        } catch (e: IOException) {
-            e.printStackTrace()
-        }
+    @Throws(IOException::class)
+    private fun readToMap(input: Path): Map<String, Entry?> {
+        val map = LinkedHashMap<String, Entry?>()
+        Files.walkFileTree(input, object : SimpleFileVisitor<Path>() {
+            @Throws(IOException::class)
+            override fun visitFile(path: Path, attr: BasicFileAttributes): FileVisitResult {
+                val entry = makeEntry(path, attr)
+                if (entry != null) map[path.toString().substring(1)] = entry
+                return FileVisitResult.CONTINUE
+            }
+        })
+        return map
     }
 
-    @Throws(IOException::class)
-    private fun add(entry: Entry) {
-        val outPath = outputFs.get().getPath(entry.path.toString())
-        if (outPath.parent != null) {
-            Files.createDirectories(outPath.parent)
+    private fun makeEntry(path: Path, attr: BasicFileAttributes): Entry? {
+        if (attr.isDirectory) return null
+        if (!path.fileName.toString().endsWith(".class")) {
+            if (path.toString() == "/META-INF/MANIFEST.MF") {
+                return  Entry(
+                    path, attr,
+                    "Manifest-Version: 1.0\nMain-Class: net.minecraft.client.Main\n".toByteArray()
+                )
+            } else {
+                if (path.toString().startsWith("/META-INF/")) {
+                    if (path.toString().endsWith(".SF") || path.toString().endsWith(".RSA")) return null
+                }
+                return Entry(path, attr, null)
+            }
         }
-        if (entry.data != null) {
-            Files.write(outPath, entry.data, StandardOpenOption.CREATE_NEW)
-        } else {
-            Files.copy(entry.path, outPath)
-        }
-        Files.getFileAttributeView(entry.path, BasicFileAttributeView::class.java)
-            .setTimes(
-                entry.metadata.creationTime(),
-                entry.metadata.lastAccessTime(),
-                entry.metadata.lastModifiedTime()
-            )
+        return Entry(path, attr, Files.readAllBytes(path))
     }
 
     @Throws(IOException::class)
     fun merge() {
-        val service = Executors.newFixedThreadPool(2)
-        service.submit { readToMap(entriesClient, inputClient, false) }
-        service.submit { readToMap(entriesServer, inputServer, true) }
-        service.shutdown()
+        val service = threadLocalContext.get().executor
         try {
-            service.awaitTermination(1, TimeUnit.HOURS)
+            val listener = progressListener
+            listener?.init(0, "Reading JAR entries")
+            val cFuture = supplyAsync { readToMap(inputClient) }
+            val sFuture = supplyAsync { readToMap(inputServer) }
+            CompletableFuture.allOf(cFuture, sFuture).join()
+            entriesClient = cFuture.get()
+            entriesServer = sFuture.get()
+            entriesAll.addAll(entriesClient.keys)
+            entriesAll.addAll(entriesServer.keys)
+            val entriesOut = ConcurrentHashMap<String, Entry?>()
+            listener?.init(entriesAll.size, "Merging JAR entries")
+            val mergeCounter = AtomicInteger()
+            service.invokeAll(entriesAll.map {
+                Callable {
+                    val entry = mergeEntry(it)
+                    listener?.step(mergeCounter.getAndIncrement(), it)
+                    if (entry != null) entriesOut[entry.path.toString().substring(1)] = entry
+                }
+            })
+            listener?.init(entriesOut.size, "Writing merged JAR entries")
+            var writeCounter = 0
+            for (e in entriesAll) {
+                val entry = entriesOut[e] ?: continue
+                val ePath = entry.path.toString()
+                listener?.step(writeCounter++, ePath.substring(1))
+                val outPath = outputFs.get().getPath(ePath)
+                if (outPath.parent != null) {
+                    Files.createDirectories(outPath.parent)
+                }
+                if (entry.data != null) {
+                    Files.write(outPath, entry.data, StandardOpenOption.CREATE_NEW)
+                } else {
+                    Files.copy(entry.path, outPath)
+                }
+                Files.getFileAttributeView(outPath, BasicFileAttributeView::class.java).setTimes(
+                    entry.metadata.creationTime(),
+                    entry.metadata.lastAccessTime(),
+                    entry.metadata.lastModifiedTime()
+                )
+            }
         } catch (e: InterruptedException) {
             e.printStackTrace()
         }
-        entriesAll.addAll(entriesClient.keys)
-        entriesAll.addAll(entriesServer.keys)
-        val entries = entriesAll.parallelStream().map { entry: String ->
-            val isClass = entry.endsWith(".class")
-            val isMinecraft =
-                entriesClient.containsKey(entry) || entry.startsWith("net/minecraft") || !entry.contains("/")
-            var result: Entry?
-            var side: String? = null
-            val entry1 = entriesClient[entry]
-            val entry2 = entriesServer[entry]
-            if (entry1 != null && entry2 != null) {
-                if (Arrays.equals(entry1.data, entry2.data)) {
-                    result = entry1
-                } else {
-                    if (isClass) {
-                        result = Entry(
-                            entry1.path,
-                            entry1.metadata,
-                            CLASS_MERGER.merge(entry1.data, entry2.data)
-                        )
-                    } else {
-                        // FIXME: More heuristics?
-                        result = entry1
-                    }
-                }
-            } else if (entry1.also { result = it } != null) {
-                side = "CLIENT"
-            } else if (entry2.also { result = it } != null) {
-                side = "SERVER"
+    }
+
+    private fun mergeEntry(entry: String): Entry? {
+        val isClass = entry.endsWith(".class")
+        val isMinecraft =
+            entriesClient.containsKey(entry) || entry.startsWith("net/minecraft") || !entry.contains("/")
+        var result: Entry? = null
+        var side: String? = null
+        val entry1 = entriesClient[entry]
+        val entry2 = entriesServer[entry]
+        if (entry1?.data != null && entry2?.data != null) {
+            result = when {
+                entry1.data.contentEquals(entry2.data) -> entry1
+                isClass -> Entry(
+                    entry1.path,
+                    entry1.metadata,
+                    CLASS_MERGER.merge(entry1.data, entry2.data)
+                )
+                else -> entry1 // FIXME: More heuristics?
             }
-            if (isClass && !isMinecraft && "SERVER" == side) {
-                // Server bundles libraries, client doesn't - skip them
-                return@map null
-            }
-            if (result != null) {
-                if (isMinecraft && isClass) {
-                    var data = result!!.data
-                    val reader = ClassReader(data)
-                    val writer = ClassWriter(0)
-                    var visitor: ClassVisitor = writer
-                    if (side != null) {
-                        visitor = ClassMerger.SidedClassVisitor(StitchUtil.ASM_VERSION, visitor, side)
-                    }
-                    if (removeSnowmen) {
-                        visitor = SnowmanClassVisitor(StitchUtil.ASM_VERSION, visitor)
-                    }
-                    if (offsetSyntheticsParams) {
-                        visitor = SyntheticParameterClassVisitor(StitchUtil.ASM_VERSION, visitor)
-                    }
-                    if (visitor !== writer) {
-                        reader.accept(visitor, 0)
-                        data = writer.toByteArray()
-                        result = Entry(result!!.path, result!!.metadata, data)
-                    }
-                }
-                return@map result
-            } else {
-                return@map null
-            }
-        }.filter { it != null }.collect(Collectors.toList()) as List<Entry>
-        for (e in entries) {
-            add(e)
+        } else if (entry1 != null) {
+            result = entry1
+            side = "CLIENT"
+        } else if (entry2 != null) {
+            result = entry2
+            side = "SERVER"
         }
+        // Server bundles libraries, client doesn't - skip them
+        if (isClass && !isMinecraft && "SERVER" == side) return null
+        if (result == null) return null
+        if (isMinecraft && isClass) {
+            var data = result.data
+            val reader = ClassReader(data)
+            val writer = ClassWriter(0)
+            var visitor: ClassVisitor = writer
+            if (side != null) visitor = ClassMerger.SidedClassVisitor(StitchUtil.ASM_VERSION, visitor, side)
+            if (removeSnowmen) visitor = SnowmanClassVisitor(StitchUtil.ASM_VERSION, visitor)
+            if (offsetSyntheticsParams) visitor = SyntheticParameterClassVisitor(StitchUtil.ASM_VERSION, visitor)
+            if (visitor !== writer) {
+                reader.accept(visitor, 0)
+                data = writer.toByteArray()
+                result = Entry(result.path, result.metadata, data)
+            }
+        }
+        return result
     }
 
     companion object {
@@ -210,38 +208,61 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
     }
 
     init {
-        if (output.exists()) {
-            if (!output.delete()) {
-                throw IOException("Could not delete " + output.name)
-            }
-        }
-        this.inputClient =
-            StitchUtil.getJarFileSystem(inputClient, false).also { inputClientFs = it }.get().getPath("/")
-        this.inputServer =
-            StitchUtil.getJarFileSystem(inputServer, false).also { inputServerFs = it }.get().getPath("/")
+        if (output.exists() && !output.delete()) throw IOException("Could not delete " + output.name)
+        this.inputClientFs = StitchUtil.getJarFileSystem(inputClient, false)
+        this.inputClient = inputClientFs!!.get().getPath("/")
+        this.inputServerFs = StitchUtil.getJarFileSystem(inputServer, false)
+        this.inputServer = inputServerFs!!.get().getPath("/")
         outputFs = StitchUtil.getJarFileSystem(output, true)
-        entriesClient = HashMap()
-        entriesServer = HashMap()
         entriesAll = TreeSet()
     }
+}
+
+fun <T> mergePreserveOrder(first: Collection<T>, second: Collection<T>): Set<T> {
+    val out = LinkedHashSet<T>()
+    val itFirst = first.iterator()
+    val itSecond = second.iterator()
+    while (itFirst.hasNext() || itSecond.hasNext()) {
+        while (itFirst.hasNext() && itSecond.hasNext()) {
+            val firstNext = itFirst.next()
+            val secondNext = itSecond.next()
+            if (firstNext == secondNext) {
+                out.add(firstNext)
+                continue
+            }
+            if (firstNext !in second) out.add(firstNext)
+            if (secondNext !in first) out.add(secondNext)
+            break
+        }
+        while (itFirst.hasNext()) {
+            val next = itFirst.next()
+            if (out.add(next) && second.contains(next)) break
+        }
+        while (itSecond.hasNext()) {
+            val next = itSecond.next()
+            if (out.add(next) && first.contains(next)) break
+        }
+    }
+    return out
 }
 
 
 class ClassMerger {
     private abstract inner class Merger<T>(entriesClient: List<T>, entriesServer: List<T>) {
-        private val entriesClient: MutableMap<String, T>
-        private val entriesServer: MutableMap<String, T>
-        private val entryNames: List<String>
+        private val entriesClient: Map<String, T>
+        private val entriesServer: Map<String, T>
+        private val entryNames: Set<String>
         abstract fun getName(entry: T): String
         abstract fun applySide(entry: T, side: String)
-        private fun toMap(entries: List<T>, map: MutableMap<String, T>): List<String> {
+        private fun toMap(entries: List<T>): Map<String, T> {
+            val map = LinkedHashMap<String, T>()
             val list: MutableList<String> = ArrayList(entries.size)
             for (entry in entries) {
                 val name = getName(entry)
                 map[name] = entry
                 list.add(name)
             }
-            return list
+            return map
         }
 
         fun merge(list: MutableList<T?>) {
@@ -261,11 +282,9 @@ class ClassMerger {
         }
 
         init {
-            this.entriesClient = LinkedHashMap()
-            this.entriesServer = LinkedHashMap()
-            val listClient = toMap(entriesClient, this.entriesClient)
-            val listServer = toMap(entriesServer, this.entriesServer)
-            entryNames = StitchUtil.mergePreserveOrder(listClient, listServer)
+            this.entriesClient = toMap(entriesClient)
+            this.entriesServer = toMap(entriesServer)
+            this.entryNames = mergePreserveOrder(this.entriesClient.keys, this.entriesServer.keys)
         }
     }
 
@@ -278,7 +297,7 @@ class ClassMerger {
         }
     }
 
-    fun merge(classClient: ByteArray?, classServer: ByteArray?): ByteArray {
+    fun merge(classClient: ByteArray, classServer: ByteArray): ByteArray {
         val readerC = ClassReader(classClient)
         val readerS = ClassReader(classServer)
         val writer = ClassWriter(0)
@@ -335,12 +354,8 @@ class ClassMerger {
             val envInterfaces: AnnotationVisitor =
                 nodeOut.visitAnnotation(ITF_LIST_DESCRIPTOR, false)
             val eiArray = envInterfaces.visitArray("value")
-            if (clientItfs.isNotEmpty()) {
-                visitItfAnnotation(eiArray, "CLIENT", clientItfs)
-            }
-            if (serverItfs.isNotEmpty()) {
-                visitItfAnnotation(eiArray, "SERVER", serverItfs)
-            }
+            if (clientItfs.isNotEmpty()) visitItfAnnotation(eiArray, "CLIENT", clientItfs)
+            if (serverItfs.isNotEmpty()) visitItfAnnotation(eiArray, "SERVER", serverItfs)
             eiArray.visitEnd()
             envInterfaces.visitEnd()
         }
@@ -397,8 +412,7 @@ class ClassMerger {
 }
 
 
-class SnowmanClassVisitor(api: Int, cv: ClassVisitor?) :
-    ClassVisitor(api, cv) {
+class SnowmanClassVisitor(api: Int, cv: ClassVisitor?) : ClassVisitor(api, cv) {
     class SnowmanMethodVisitor(api: Int, methodVisitor: MethodVisitor?) :
         MethodVisitor(api, methodVisitor) {
         override fun visitParameter(name: String?, access: Int) {

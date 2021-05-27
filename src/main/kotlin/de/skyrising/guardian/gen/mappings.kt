@@ -118,22 +118,3 @@ fun mapJar(version: String, input: Path, output: Path, mappings: EntryTree<Entry
     Files.createDirectories(output.parent)
     jar.write(output, VersionedProgressListener(version, "Writing deobfuscated jar"))
 }
-
-class VersionedProgressListener(val version: String, initialTitle: String) : ProgressListener {
-    var totalWork = 0
-    var title = initialTitle
-    override fun init(totalWork: Int, title: String?) {
-        this.totalWork = totalWork
-        if (title != null) this.title = title
-    }
-
-    override fun step(numDone: Int, message: String?) {
-        if (totalWork > 0) {
-            output(version, String.format("%s: %.1f%%", title, 100.0 * numDone / totalWork))
-        } else if (message != null) {
-            output(version, "$title: $message")
-        } else {
-            output(version, "$title: $numDone")
-        }
-    }
-}

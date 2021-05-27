@@ -1,12 +1,12 @@
 package de.skyrising.guardian.gen
 
+import cuchaz.enigma.ProgressListener
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.io.PrintStream
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.concurrent.ConcurrentHashMap
-
 
 val outputs = ConcurrentHashMap<String, String>()
 private val outputStreams = ConcurrentHashMap<String, PrintStream>()
@@ -85,4 +85,21 @@ fun <R> outputTo(key: String, cb: () -> R): R {
 
 fun closeOutput(key: String) {
     outputs.remove(key)
+}
+
+class VersionedProgressListener(val version: String, initialTitle: String) : ProgressListener {
+    var totalWork = 0
+    var title = initialTitle
+    override fun init(totalWork: Int, title: String?) {
+        this.totalWork = totalWork
+        if (title != null) this.title = title
+    }
+
+    override fun step(numDone: Int, message: String?) {
+        when {
+            totalWork > 0 -> output(version, String.format("%s: %.1f%%", title, 100.0 * numDone / totalWork))
+            message != null -> output(version, "$title: $message")
+            else -> output(version, "$title: $numDone")
+        }
+    }
 }
