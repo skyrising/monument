@@ -74,6 +74,10 @@ fun <K, V> deduplicate(map: MutableMap<K, CompletableFuture<V>>, key: K, future:
 class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism: Int, threadFactory: ThreadFactory) : AbstractExecutorService(), CustomExecutorService {
     constructor(parallelism: Int) : this(parallelism, parallelism, Executors.defaultThreadFactory())
 
+    companion object {
+        val DEBUG = System.getProperty("monument.scheduler.debug") != null
+    }
+
     var decompileParallelism = initialDecompileParallelism
         set(value) {
             if (value < 1) throw IllegalArgumentException()
@@ -106,7 +110,7 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
                     continue
                 }
                 try {
-                    output("scheduler", "Running $task in worker $id")
+                    if (DEBUG) output("scheduler", "Running $task in worker $id")
                     task.runnable.run()
                 } finally {
                     if (task.decompile) decompileSemaphore.release()
@@ -120,11 +124,11 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
 
         @Throws(InterruptedException::class)
         private fun waitForNextTask(): Task {
-            output("scheduler", "Worker $id is waiting for task")
+            if (DEBUG) output("scheduler", "Worker $id is waiting for task")
             val task = runnableTasks.take()
             try {
                 if (task.decompile && !decompileSemaphore.tryAcquire()) {
-                    output("scheduler", "Worker $id is awaiting semaphore for $task, queue length: ${decompileSemaphore.queueLength}")
+                    if (DEBUG) output("scheduler", "Worker $id is awaiting semaphore for $task, queue length: ${decompileSemaphore.queueLength}")
                     decompileSemaphore.acquire()
                 }
             } catch (e: InterruptedException) {
@@ -156,7 +160,7 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
 
     private fun schedule(task: Task) {
         if (!running) throw RejectedExecutionException()
-        output("scheduler", "Scheduling $task")
+        if (DEBUG) output("scheduler", "Scheduling $task")
         scheduledTasks.add(task)
         runnableTasks.add(task)
     }
