@@ -6,6 +6,7 @@ import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 
 interface Decompiler {
     val name: String
@@ -45,7 +46,7 @@ abstract class CommonDecompiler(override val name: String) : Decompiler {
 }
 
 abstract class JavaDecompiler(name: String, private val allowSharing: Boolean = true) : CommonDecompiler(name) {
-    private val classLoaders = mutableMapOf<URL, ClassLoader>()
+    private val classLoaders = ConcurrentHashMap<URL, ClassLoader>()
 
     abstract fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?): CompletableFuture<Path>
 
