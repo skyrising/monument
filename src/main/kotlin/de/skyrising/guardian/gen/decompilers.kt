@@ -3,28 +3,32 @@ package de.skyrising.guardian.gen
 import java.io.File
 import java.net.URL
 import java.net.URLClassLoader
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 
 interface Decompiler {
     val name: String
+    val maxParallelism get() = Integer.MAX_VALUE
     fun decompile(artifact: MavenArtifact?, version: String, jar: Path, outputDir: Path, cp: List<Path>? = null): CompletableFuture<Path>
 
     companion object {
         val CFR = object : JavaDecompiler("cfr", false /* Workaround for https://github.com/leibnitz27/cfr/issues/250 */) {
-            override fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?) = supplyAsync {
-                val options = mutableMapOf(
-                    "showversion" to "false",
-                    "silent" to "false",
-                    "comments" to "false",
-                    "outputpath" to outputDir.toAbsolutePath().toString()
-                )
-                if (cp != null && cp.isNotEmpty()) options["extraclasspath"] = formatClassPath(cp)
-                val builder = Class.forName("org.benf.cfr.reader.api.CfrDriver\$Builder", true, classLoader).newInstance()
-                builder.javaClass.getMethod("withOptions", Map::class.java).invoke(builder, options)
-                val driver = builder.javaClass.getMethod("build").invoke(builder)
+            override fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?) = supplyAsyncDecompile {
                 outputTo(version) {
-                    driver.javaClass.getMethod("analyse", List::class.java).invoke(driver, listOf(jar.toAbsolutePath().toString()))
+                    Timer(version, "decompile").use {
+                        val options = mutableMapOf(
+                            "showversion" to "false",
+                            "silent" to "false",
+                            "comments" to "false",
+                            "outputpath" to outputDir.toAbsolutePath().toString()
+                        )
+                        if (cp != null && cp.isNotEmpty()) options["extraclasspath"] = formatClassPath(cp)
+                        val builder = Class.forName("org.benf.cfr.reader.api.CfrDriver\$Builder", true, classLoader).newInstance()
+                        builder.javaClass.getMethod("withOptions", Map::class.java).invoke(builder, options)
+                        val driver = builder.javaClass.getMethod("build").invoke(builder)
+                        driver.javaClass.getMethod("analyse", List::class.java).invoke(driver, listOf(jar.toAbsolutePath().toString()))
+                    }
                 }
                 outputDir
             }
@@ -67,17 +71,15 @@ abstract class JavaDecompiler(name: String, private val allowSharing: Boolean = 
 }
 
 open class FernflowerDecompiler(name: String) : JavaDecompiler(name) {
-    protected fun getArgs(jar: Path, outputDir: Path, cp: List<Path>?, defaults: Map<String, Any>, doesSingleFile: Boolean): Array<String> {
+    protected fun getArgs(jar: Path, outputDir: Path, cp: List<Path>?, defaults: Map<String, Any>): Array<String> {
         val args = mutableListOf("-ind=    ")
-        if (defaults.containsKey("thr")) {
-            val threads = 1; // Runtime.getRuntime().availableProcessors() - 2) / ForkJoinPool.getCommonPoolParallelism()
-            args.add("-thr=$threads")
-        }
+        val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
+        executor.decompileParallelism = 4
         if (cp != null) {
             for (p in cp) args.add("-e=${p.toAbsolutePath()}")
         }
         args.add(jar.toAbsolutePath().toString())
-        args.add((if (doesSingleFile) outputDir.resolve("tmp.jar") else outputDir).toAbsolutePath().toString())
+        args.add(outputDir.toAbsolutePath().toString())
         return args.toTypedArray()
     }
 
@@ -86,22 +88,22 @@ open class FernflowerDecompiler(name: String) : JavaDecompiler(name) {
         return prefsCls.getField("DEFAULTS").get(null) as Map<String, Any>
     }
 
-    override fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?) = supplyAsync {
+    override fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?) = supplyAsyncDecompile {
         outputTo(version) {
-            val defaults = getDefaultOptions(classLoader)
-            val doesSingleFile = try {
-                Class.forName("org.jetbrains.java.decompiler.main.decompiler.SingleFileSaver", false, classLoader)
-                true
-            } catch (ignored: ClassNotFoundException) {
-                false
+            val clsOutput = outputDir.resolve("bin")
+            val srcOutput = outputDir.resolve("src")
+            Timer(version, "decompile.extractClasses").use {
+                getJarFileSystem(jar).use {
+                    copy(it.getPath("/"), clsOutput)
+                }
+                Files.createDirectories(srcOutput)
             }
-            val cls = Class.forName("org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler", true, classLoader)
-            val main = cls.getMethod("main", Array<String>::class.java)
-            main.invoke(null, getArgs(jar, outputDir, cp, defaults, doesSingleFile))
-            if (doesSingleFile) {
-                getJarFileSystem(outputDir.resolve("tmp.jar")).getPath("/")
-            } else {
-                outputDir
+            Timer(version, "decompile").use {
+                val defaults = getDefaultOptions(classLoader)
+                val cls = Class.forName("org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler", true, classLoader)
+                val main = cls.getMethod("main", Array<String>::class.java)
+                main.invoke(null, getArgs(clsOutput, srcOutput, cp, defaults))
+                srcOutput
             }
         }
     }

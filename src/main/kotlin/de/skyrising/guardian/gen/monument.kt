@@ -8,8 +8,6 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.*
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.ForkJoinPool
 import java.util.stream.Collectors
 import kotlin.system.exitProcess
 
@@ -127,6 +125,8 @@ fun update(branch: String = "master", action: String = "update") {
     if (check) exitProcess(if (missing.isEmpty()) 1 else 0)
 
     if (missing.isNotEmpty()) {
+        val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
+        executor.decompileParallelism = 1
         val futures = mutableListOf<CompletableFuture<Path>>()
         enableOutput()
         for (version in missing) futures.add(genSources(version.id, mappings, decompiler, decompilerMap, postProcessors))
@@ -170,6 +170,7 @@ fun update(branch: String = "master", action: String = "update") {
     for (version in supported) history.add(CommitTemplate(version, getSourcePath(version.id, mappings, decompiler)))
     createBranch(branch, config.git, history)
     val time = (System.currentTimeMillis() - startTime) / 1000.0
+    threadLocalContext.get().executor.shutdownNow()
     println(String.format(Locale.ROOT, "Done in %.3fs", time))
     dumpTimers(System.out)
 }
@@ -207,7 +208,7 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
             val libs = libsFuture.get()
             output(version, "Decompiling with ${decompiler.name}")
             val artifact = decompilerMap[decompiler]
-            time(version, "decompile", decompiler.decompile(artifact, version, jar, tmpOut, libs))
+            decompiler.decompile(artifact, version, jar, tmpOut, libs)
         }
     }.thenCompose {
         time(version, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
@@ -222,8 +223,8 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
 
 val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context.default }
 
-data class Context(val executor: ExecutorService) {
+data class Context(val executor: CustomExecutorService) {
     companion object {
-        val default = Context(ForkJoinPool.commonPool())
+        val default = Context(CustomThreadPoolExecutor(Runtime.getRuntime().availableProcessors() - 2))
     }
 }

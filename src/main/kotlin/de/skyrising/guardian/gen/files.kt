@@ -58,13 +58,13 @@ fun rmrf(path: Path) {
 fun copy(path: Path, to: Path, vararg options: CopyOption) {
     Files.walkFileTree(path, object : SimpleFileVisitor<Path>() {
         override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes?): FileVisitResult {
-            val dest = to.resolve(path.relativize(dir))
+            val dest = to.resolve(path.relativize(dir).toString())
             Files.createDirectories(dest)
             return FileVisitResult.CONTINUE
         }
 
         override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-            val dest = to.resolve(path.relativize(file))
+            val dest = to.resolve(path.relativize(file).toString())
             Files.copy(file, dest, *options)
             return FileVisitResult.CONTINUE
         }
