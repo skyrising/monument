@@ -49,8 +49,16 @@ data class FilterConfig(val type: String?, val exclude: List<String>) : Function
         else -> true
     }
 }
-data class ArtifactSpec(val group: String, val id: String, val version: String, val classifier: String? = null)
-data class MavenArtifact(val mavenUrl: URI, val artifact: ArtifactSpec)
+data class ArtifactSpec(val group: String, val id: String, val version: String, val classifier: String? = null) {
+    override fun toString(): String {
+        return if (classifier != null) {
+            "$group:$id:$version:$classifier"
+        } else {
+            "$group:$id:$version"
+        }
+    }
+}
+data class MavenArtifact(val mavenUrl: URI, val artifact: ArtifactSpec) {}
 data class DecompilerMap(val map: Map<Decompiler, MavenArtifact>)
 
 val GSON: Gson = GsonBuilder()

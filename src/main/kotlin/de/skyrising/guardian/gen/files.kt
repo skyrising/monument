@@ -277,3 +277,19 @@ fun extractGradle(id: String, out: Path): CompletableFuture<Unit> = supplyAsync 
 }.thenCompose {
     generateGradleBuild(id, out)
 }
+
+fun getMonumentClassRoot(): Path? {
+    val dummyClass = Dummy::class.java
+    val dummyFileName = "/" + dummyClass.name.replace('.', '/') + ".class"
+    val dummyUrl = dummyClass.getResource(dummyFileName)
+        ?: return null
+    val uri = dummyUrl.toURI()
+    return when (uri.scheme) {
+        "file" -> {
+            val p = Paths.get(uri).toString()
+            Paths.get(p.substring(0, p.indexOf(dummyFileName)))
+        }
+        "jar" -> Paths.get(uri.schemeSpecificPart.substring(5, uri.schemeSpecificPart.indexOf('!')))
+        else -> null
+    }
+}

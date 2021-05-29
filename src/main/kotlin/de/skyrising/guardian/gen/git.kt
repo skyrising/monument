@@ -2,6 +2,7 @@ package de.skyrising.guardian.gen
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.CompletableFuture
@@ -68,4 +69,21 @@ fun gitCommit(dir: Path, date: ZonedDateTime, config: GitConfig, vararg args: St
     env["GIT_COMMITTER_EMAIL"] = config.committer.email
     val p = pb.start()
     return CompletableFuture.supplyAsync { p.waitFor() }
+}
+
+fun getMonumentVersion(): String {
+    return try {
+        val path = getMonumentClassRoot() ?: Paths.get(".")
+        val pb = ProcessBuilder(listOf("git", "describe", "--always", "--tags", "--dirty"))
+        pb.directory(path.toFile())
+        pb.redirectOutput(ProcessBuilder.Redirect.PIPE)
+        pb.redirectError(ProcessBuilder.Redirect.PIPE)
+        val p = pb.start()
+        val code = p.waitFor()
+        if (code != 0) return "unknown"
+        p.inputStream.bufferedReader().readText().trim()
+    } catch (e: Exception) {
+        e.printStackTrace()
+        "unknown"
+    }
 }

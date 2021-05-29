@@ -11,6 +11,8 @@ import java.util.concurrent.CompletableFuture
 import java.util.stream.Collectors
 import kotlin.system.exitProcess
 
+val MONUMENT_VERSION = getMonumentVersion()
+
 val MAVEN_CENTRAL = URI("https://repo1.maven.org/maven2/")
 val FORGE_MAVEN = URI("https://maven.minecraftforge.net/")
 val FABRIC_MAVEN = URI("https://maven.fabricmc.net/")
@@ -195,6 +197,10 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
     val javaOut = out.resolve("src/main/java")
     val tmpOut = out.resolve("src/main/java-tmp")
     Files.createDirectories(tmpOut)
+    Files.write(out.resolve(".monument"), listOf(
+        "Monument version: $MONUMENT_VERSION",
+        "Decompiler: " + decompilerMap[decompiler]!!.artifact
+    ))
     return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
         time(version, "extractResources", extractResources(jar, resOut, postProcessors))
