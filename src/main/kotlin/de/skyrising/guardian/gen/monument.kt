@@ -170,7 +170,7 @@ fun update(branch: String = "master", action: String = "update") {
     println("Creating branch '$branch'")
     val history = mutableListOf<CommitTemplate>()
     for (version in supported) history.add(CommitTemplate(version, getSourcePath(version.id, mappings, decompiler)))
-    createBranch(branch, config.git, history)
+    createBranch(branch, config.git, history, false)
     val time = (System.currentTimeMillis() - startTime) / 1000.0
     threadLocalContext.get().executor.shutdownNow()
     println(String.format(Locale.ROOT, "Done in %.3fs", time))

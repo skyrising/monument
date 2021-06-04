@@ -9,13 +9,31 @@ import java.util.concurrent.CompletableFuture
 
 data class CommitTemplate(val version: VersionInfo, val source: Path)
 
-fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate>) {
+fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate>, recommit: Boolean) {
     if (Files.exists(TEMP_REPO_DIR)) rmrf(TEMP_REPO_DIR)
     Files.createDirectories(TEMP_REPO_DIR)
-    git(TEMP_REPO_DIR, "init").join()
-    git(TEMP_REPO_DIR, "remote", "add", "guardian", REPO_DIR.toAbsolutePath().toString()).join()
-    git(TEMP_REPO_DIR, "checkout", "-b", branch).join()
-    for (commit in history) {
+    var todo = history
+    if (Files.exists(REPO_DIR.resolve("refs/heads/$branch")) && !recommit) {
+        git(TEMP_REPO_DIR.parent, "clone", REPO_DIR.toAbsolutePath().toString(), TEMP_REPO_DIR.fileName.toString()).join()
+        git(TEMP_REPO_DIR, "checkout", branch).join()
+        val prevHistory = gitLines(TEMP_REPO_DIR, "log", "--format=%s", "--reverse").join()
+        val commonPrefix = findCommonPrefix(prevHistory, history.map { it.version.id })
+        if (commonPrefix == 0) {
+            rmrf(TEMP_REPO_DIR)
+            return createBranch(branch, config, history, true)
+        }
+        val commits = gitLines(TEMP_REPO_DIR, "log", "--format=%H", "--reverse").join()
+        todo = history.subList(commonPrefix, history.size)
+        git(TEMP_REPO_DIR, "reset", "--hard", commits[commonPrefix - 1]).join()
+        Files.list(TEMP_REPO_DIR).forEach {
+            if (!it.endsWith(".git")) rmrf(it)
+        }
+    } else {
+        git(TEMP_REPO_DIR, "init").join()
+        git(TEMP_REPO_DIR, "remote", "add", "origin", REPO_DIR.toAbsolutePath().toString()).join()
+        git(TEMP_REPO_DIR, "checkout", "-b", branch).join()
+    }
+    for (commit in todo) {
         Timer(commit.version.id, "commit").use {
             val destFiles = mutableMapOf<Path, Path>()
             Files.list(commit.source).forEach {
@@ -27,12 +45,12 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
             git(TEMP_REPO_DIR, "add", ".").join()
             gitCommit(TEMP_REPO_DIR, commit.version.releaseTime, config, "-m", commit.version.id).join()
             val tag = if (branch == "master") commit.version.id else "$branch-${commit.version.id}"
-            git(TEMP_REPO_DIR, "tag", tag).join()
+            git(TEMP_REPO_DIR, "tag", "--force", tag).join()
             // for (repoFile in destFiles) rmrf(repoFile)
             for ((a, b) in destFiles) Files.move(a, b)
         }
     }
-    git(TEMP_REPO_DIR, "push", "--force", "--set-upstream", "guardian", branch).join()
+    git(TEMP_REPO_DIR, "push", "--force", "--set-upstream", "origin", branch).join()
     git(TEMP_REPO_DIR, "push", "--tags", "--force").join()
     val gcLock = TEMP_REPO_DIR.resolve(".git/gc.log.lock")
     while (Files.exists(gcLock)) {
@@ -44,6 +62,7 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
 fun git(dir: Path, vararg args: String): CompletableFuture<Int> {
     val command = mutableListOf("git")
     for (arg in args) command += arg
+    println("# " + command.joinToString(" "))
     val pb = ProcessBuilder(command)
     pb.redirectOutput(ProcessBuilder.Redirect.INHERIT)
     pb.redirectError(ProcessBuilder.Redirect.INHERIT)
@@ -52,9 +71,27 @@ fun git(dir: Path, vararg args: String): CompletableFuture<Int> {
     return CompletableFuture.supplyAsync { p.waitFor() }
 }
 
+fun gitLines(dir: Path, vararg args: String): CompletableFuture<List<String>> {
+    val command = mutableListOf("git")
+    for (arg in args) command += arg
+    println("# " + command.joinToString(" "))
+    val pb = ProcessBuilder(command)
+    pb.redirectOutput(ProcessBuilder.Redirect.PIPE)
+    pb.redirectError(ProcessBuilder.Redirect.PIPE)
+    pb.directory(dir.toFile())
+    val p = pb.start()
+    val lines = mutableListOf<String>()
+    p.inputStream.reader().forEachLine { lines.add(it) }
+    return CompletableFuture.supplyAsync {
+        p.waitFor()
+        lines
+    }
+}
+
 fun gitCommit(dir: Path, date: ZonedDateTime, config: GitConfig, vararg args: String): CompletableFuture<Int> {
     val command = mutableListOf("git", "commit", "--no-gpg-sign")
     for (arg in args) command += arg
+    println("# " + command.joinToString(" "))
     val pb = ProcessBuilder(command)
     pb.redirectOutput(ProcessBuilder.Redirect.INHERIT)
     pb.redirectError(ProcessBuilder.Redirect.INHERIT)
@@ -86,4 +123,12 @@ fun getMonumentVersion(): String {
         e.printStackTrace()
         "unknown"
     }
+}
+
+fun <T> findCommonPrefix(a: List<T>, b: List<T>): Int {
+    val limit = minOf(a.size, b.size)
+    for (i in 0 until limit) {
+        if (a[i] != b[i]) return i
+    }
+    return limit
 }
