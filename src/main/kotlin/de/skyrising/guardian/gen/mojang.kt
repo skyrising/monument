@@ -155,8 +155,10 @@ fun generateGradleBuild(id: String, dir: Path): CompletableFuture<Unit> = getVer
         out.println("apply plugin: 'java'")
         out.println("apply plugin: 'application'")
         out.println()
-        out.println("sourceCompatibility = JavaVersion.VERSION_1_8")
-        out.println("targetCompatibility = JavaVersion.VERSION_1_8")
+        val javaVersion = manifest["javaVersion"]?.asJsonObject?.get("majorVersion")?.asInt ?: 8
+        val gradleJavaVersion = if (javaVersion <= 8) "JavaVersion.VERSION_1_$javaVersion" else "JavaVersion.VERSION_$javaVersion"
+        out.println("sourceCompatibility = $gradleJavaVersion")
+        out.println("targetCompatibility = $gradleJavaVersion")
         out.println()
         out.println("repositories {")
         out.println("    maven {")
