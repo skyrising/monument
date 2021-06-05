@@ -160,7 +160,7 @@ fun update(branch: String, action: String, recommitFrom: String?) {
     println("${spellVersions(supported.size)} supported by '${mappings.name}' mappings")
     val missing = supported.parallelStream().filter {
         val srcPath = getSourcePath(it.id, mappings, decompiler)
-        Files.notExists(srcPath) || Files.exists(srcPath.resolve("src/main/java-tmp"))
+        Files.notExists(srcPath) || Files.notExists(srcPath.resolve("src/main/java")) || Files.exists(srcPath.resolve("src/main/java-tmp"))
     }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
     println("Source code for ${spellVersions(missing.size)} missing")
 
@@ -232,6 +232,7 @@ fun getMappedMergedJar(version: String, provider: MappingProvider): CompletableF
 
 fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, MavenArtifact>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
     val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version)
+    if (Files.exists(out)) rmrf(out)
     Files.createDirectories(out)
     val resOut = out.resolve("src/main/resources")
     val javaOut = out.resolve("src/main/java")
