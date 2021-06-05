@@ -1,5 +1,7 @@
 package de.skyrising.guardian.gen
 
+import joptsimple.OptionException
+import joptsimple.OptionParser
 import org.tomlj.Toml
 import java.io.IOException
 import java.net.URI
@@ -33,12 +35,50 @@ val CACHE_DIR: Path = Paths.get(System.getenv("MONUMENT_CACHE") ?: ".cache")
 val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
 fun main(args: Array<String>) {
-    when (args.size) {
-        0 -> update()
-        1 -> update(args[0])
-        2 -> update(args[0], args[1])
-        else -> println("usage: monument [branch] [action]")
+    val parser = OptionParser()
+    val helpArg = parser.accepts("help").forHelp()
+    val nonOptionsArg = parser.nonOptions()
+    val recommitArg = parser.acceptsAll(listOf("r", "recommit"), "Recommit more of the history than necessary").withOptionalArg().ofType(String::class.java)
+    fun printUsage() {
+        System.err.println("Usage: monument [options] [branch] [action]")
+        parser.printHelpOn(System.err)
     }
+    var recommitFrom: String? = null
+    var branch = "master"
+    var action = "update"
+    try {
+        val options = parser.parse(*args)
+        if (options.has(helpArg)) {
+            printUsage()
+            return
+        }
+        if (options.has(recommitArg)) {
+            recommitFrom = ":base"
+            recommitArg.valueOptional(options).ifPresent { recommitFrom = it }
+        }
+        val nonOptions = nonOptionsArg.values(options)
+        when (nonOptions.size) {
+            0 -> {}
+            1 -> {
+                branch = nonOptions[0]
+            }
+            2 -> {
+                branch = nonOptions[0]
+                action = nonOptions[1]
+            }
+            else -> throw IllegalArgumentException("Expected <branch> <action>, got ${nonOptions.size} arguments")
+        }
+    } catch (e: RuntimeException) {
+        if (e is OptionException || e is IllegalArgumentException) {
+            System.err.println(e.message)
+        } else {
+            e.printStackTrace()
+        }
+        println()
+        printUsage()
+        return
+    }
+    update(branch, action, recommitFrom)
 }
 
 fun readConfig(): Config {
@@ -69,7 +109,7 @@ fun readConfig(): Config {
     return GSON.fromJson(json)
 }
 
-fun update(branch: String = "master", action: String = "update") {
+fun update(branch: String, action: String, recommitFrom: String?) {
     val startTime = System.currentTimeMillis()
     val check = action == "check"
     if (!check) {
@@ -170,7 +210,7 @@ fun update(branch: String = "master", action: String = "update") {
     println("Creating branch '$branch'")
     val history = mutableListOf<CommitTemplate>()
     for (version in supported) history.add(CommitTemplate(version, getSourcePath(version.id, mappings, decompiler)))
-    createBranch(branch, config.git, history, false)
+    createBranch(branch, config.git, history, recommitFrom ?: missing.firstOrNull()?.id)
     val time = (System.currentTimeMillis() - startTime) / 1000.0
     threadLocalContext.get().executor.shutdownNow()
     println(String.format(Locale.ROOT, "Done in %.3fs", time))

@@ -22,6 +22,7 @@ dependencies {
     implementation("org.tomlj:tomlj:1.0.0")
     implementation("org.ow2.asm:asm:9.1")
     implementation("org.ow2.asm:asm-tree:9.1")
+    implementation("net.sf.jopt-simple:jopt-simple:6.0-alpha-3")
 }
 
 application {

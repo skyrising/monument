@@ -9,18 +9,20 @@ import java.util.concurrent.CompletableFuture
 
 data class CommitTemplate(val version: VersionInfo, val source: Path)
 
-fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate>, recommit: Boolean) {
+fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate>, recommitFrom: String?) {
     if (Files.exists(TEMP_REPO_DIR)) rmrf(TEMP_REPO_DIR)
     Files.createDirectories(TEMP_REPO_DIR)
     var todo = history
-    if (Files.exists(REPO_DIR.resolve("refs/heads/$branch")) && !recommit) {
+    val recommitFull = recommitFrom == ":base"
+    if (Files.exists(REPO_DIR.resolve("refs/heads/$branch")) && !recommitFull) {
         git(TEMP_REPO_DIR.parent, "clone", REPO_DIR.toAbsolutePath().toString(), TEMP_REPO_DIR.fileName.toString()).join()
         git(TEMP_REPO_DIR, "checkout", branch).join()
         val prevHistory = gitLines(TEMP_REPO_DIR, "log", "--format=%s", "--reverse").join()
-        val commonPrefix = findCommonPrefix(prevHistory, history.map { it.version.id })
-        if (commonPrefix == 0) {
+        val recommitIndex = if (recommitFrom != null) history.indexOfFirst { it.version.id == recommitFrom } else history.size
+        val commonPrefix = minOf(findCommonPrefix(prevHistory, history.map { it.version.id }), recommitIndex)
+        if (commonPrefix <= 0) {
             rmrf(TEMP_REPO_DIR)
-            return createBranch(branch, config, history, true)
+            return createBranch(branch, config, history, ":base")
         }
         val commits = gitLines(TEMP_REPO_DIR, "log", "--format=%H", "--reverse").join()
         todo = history.subList(commonPrefix, history.size)
