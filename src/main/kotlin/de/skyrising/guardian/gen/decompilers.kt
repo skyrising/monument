@@ -1,7 +1,7 @@
 package de.skyrising.guardian.gen
 
 import java.io.File
-import java.net.URL
+import java.net.URI
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
@@ -46,7 +46,7 @@ abstract class CommonDecompiler(override val name: String) : Decompiler {
 }
 
 abstract class JavaDecompiler(name: String, private val allowSharing: Boolean = true) : CommonDecompiler(name) {
-    private val classLoaders = ConcurrentHashMap<URL, ClassLoader>()
+    private val classLoaders = ConcurrentHashMap<URI, ClassLoader>()
 
     abstract fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?): CompletableFuture<Path>
 
@@ -56,7 +56,7 @@ abstract class JavaDecompiler(name: String, private val allowSharing: Boolean = 
         jar: Path,
         outputDir: Path,
         cp: List<Path>?
-    ): CompletableFuture<Path> = getMavenArtifact(artifact!!).thenCompose { url: URL ->
+    ): CompletableFuture<Path> = getMavenArtifact(artifact!!).thenCompose { url: URI ->
         val classLoader = if (allowSharing) {
             classLoaders.computeIfAbsent(url, this::createClassLoader)
         } else {
@@ -65,7 +65,7 @@ abstract class JavaDecompiler(name: String, private val allowSharing: Boolean = 
         decompile(classLoader, version, jar, outputDir, cp)
     }
 
-    private fun createClassLoader(url: URL): ClassLoader = URLClassLoader(arrayOf(url))
+    private fun createClassLoader(url: URI): ClassLoader = URLClassLoader(arrayOf(url.toURL()))
 
     override fun toString() = "JavaDecompiler($name)"
 

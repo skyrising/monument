@@ -155,7 +155,9 @@ fun update(branch: String, action: String, recommitFrom: String?) {
     }
     println("Filtering version list (${spellVersions(branchVersions.size)})")
     val supported = branchVersions.values.parallelStream().filter {
-        immediate { mappings.supportsVersion(it.id, MappingTarget.CLIENT) } || immediate { mappings.supportsVersion(it.id, MappingTarget.SERVER) }
+        immediate { mappings.supportsVersion(it.id, MappingTarget.MERGED) }
+        || immediate { mappings.supportsVersion(it.id, MappingTarget.CLIENT) }
+        || immediate { mappings.supportsVersion(it.id, MappingTarget.SERVER) }
     }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
     println("${spellVersions(supported.size)} supported by '${mappings.name}' mappings")
     val missing = supported.parallelStream().filter {

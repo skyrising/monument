@@ -1,5 +1,6 @@
 package de.skyrising.guardian.gen
 
+import com.google.gson.JsonArray
 import cuchaz.enigma.Enigma
 import cuchaz.enigma.ProgressListener
 import cuchaz.enigma.classprovider.ClasspathClassProvider
@@ -7,7 +8,7 @@ import cuchaz.enigma.translation.mapping.EntryMapping
 import cuchaz.enigma.translation.mapping.serde.MappingFormat
 import cuchaz.enigma.translation.mapping.tree.EntryTree
 import cuchaz.enigma.translation.mapping.tree.HashEntryTree
-import java.net.URL
+import java.net.URI
 import java.nio.file.FileSystem
 import java.nio.file.Files
 import java.nio.file.Path
@@ -33,21 +34,17 @@ interface MappingProvider {
     }
     companion object {
         val MOJANG = object : CommonMappingProvider("mojang", MappingFormat.PROGUARD, "txt") {
-            override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URL?> =
+            override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?> =
                 if (target == MappingTarget.MERGED) CompletableFuture.completedFuture(null)
                 else getVersionManifest(mappingVersion).thenApply { manifest ->
-                    manifest["downloads"]?.asJsonObject?.get(target.id + "_mappings")?.asJsonObject?.get("url")?.asString?.let { URL(it) }
+                    manifest["downloads"]?.asJsonObject?.get(target.id + "_mappings")?.asJsonObject?.get("url")?.asString?.let { URI(it) }
                 }
         }
-        val INTERMEDIARY = object : JarMappingProvider("intermediary", MappingFormat.TINY_V2) {
-            override fun getFile(version: String, target: MappingTarget, jar: FileSystem) = jar.getPath("mappings/mappings.tiny")
-            override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URL?> {
-                TODO("Not yet implemented")
-            }
-        }
+        val FABRIC_INTERMEDIARY = IntermediaryMappingProvider("fabric", URI("https://meta.fabricmc.net/v2/"), URI("https://maven.fabricmc.net/"))
+        val LEGACY_INTERMEDIARY = IntermediaryMappingProvider("legacy", URI("https://meta.legacyfabric.net/v2/"), URI("https://maven.legacyfabric.net/"))
+        val QUILT_INTERMEDIARY = IntermediaryMappingProvider("quilt", URI("https://meta.quiltmc.org/v3/"), URI("https://maven.quiltmc.org/repository/release/"))
         val YARN = object : JarMappingProvider("yarn", MappingFormat.TINY_V2) {
-            override fun getFile(version: String, target: MappingTarget, jar: FileSystem) = jar.getPath("mappings/mappings.tiny")
-            override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URL?> {
+            override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?> {
                 TODO("Not yet implemented")
             }
         }
@@ -55,7 +52,7 @@ interface MappingProvider {
 }
 
 abstract class CommonMappingProvider(override val name: String, override val format: MappingFormat, private val ext: String) : MappingProvider {
-    abstract fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URL?>
+    abstract fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?>
     override fun supportsVersion(version: String, target: MappingTarget, cache: Path): CompletableFuture<Boolean> = getUrl(getPath(cache, version), version, target).thenApply { it != null }
     override fun getLatestMappingVersion(version: String, target: MappingTarget, cache: Path): CompletableFuture<String> = CompletableFuture.completedFuture(version)
     override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> {
@@ -68,25 +65,35 @@ abstract class CommonMappingProvider(override val name: String, override val for
         }
     }
 
-    override fun toString() = "CommonMappingProvider($name)"
+    override fun toString() = "${javaClass.simpleName}($name)"
 }
 
 abstract class JarMappingProvider(override val name: String, override val format: MappingFormat) : CommonMappingProvider(name, format, "jar") {
-    abstract fun getFile(version: String, target: MappingTarget, jar: FileSystem): Path
+    open fun getFile(version: String, target: MappingTarget, jar: FileSystem): Path = jar.getPath("mappings/mappings.tiny")
     override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> {
         val jarFile = getPath(cache, mappingVersion).resolve("mappings-${target.id}.jar")
         return getUrl(getPath(cache, mappingVersion), mappingVersion, target).thenCompose { url ->
             if (url == null) CompletableFuture.completedFuture(Unit) else download(url, jarFile)
         }.thenApplyAsync {
             if (!Files.exists(jarFile)) return@thenApplyAsync null
-            format.read(jarFile, ProgressListener.none(), null)
             getJarFileSystem(jarFile).use { fs ->
                 format.read(getFile(mappingVersion, target, fs), ProgressListener.none(), null)
             }
         }
     }
+}
 
-    override fun toString() = "JarMappingProvider($name)"
+class IntermediaryMappingProvider(prefix: String, private val meta: URI, private val maven: URI) : JarMappingProvider("$prefix-intermediary", MappingFormat.TINY_V2) {
+    override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?> {
+        if (target != MappingTarget.MERGED) return CompletableFuture.completedFuture(null)
+        return requestJson<JsonArray>(meta.resolve("versions/intermediary/$mappingVersion")).handle { it, e ->
+            if (e != null) null else it
+        }.thenApply {
+            if (it == null || it.size() == 0) return@thenApply null
+            val spec: ArtifactSpec = GSON.fromJson(it[0].asJsonObject["maven"])
+            MavenArtifact(maven, spec.copy(classifier = "v2")).getURL()
+        }
+    }
 }
 
 enum class MappingTarget(val id: String) {

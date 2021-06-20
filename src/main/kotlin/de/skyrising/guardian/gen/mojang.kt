@@ -2,11 +2,8 @@ package de.skyrising.guardian.gen
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import java.io.InputStreamReader
 import java.io.PrintWriter
-import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -22,14 +19,7 @@ val JARS_MERGED_DIR: Path = JARS_DIR.resolve("merged")
 val MOJANG_CACHE_DIR: Path = CACHE_DIR.resolve("mojang")
 val LIBS_CACHE_DIR: Path = MOJANG_CACHE_DIR.resolve("libraries")
 
-private fun requestJson(url: URI): CompletableFuture<JsonObject> = supplyAsync {
-    println("Fetching $url")
-    val conn = url.toURL().openConnection() as HttpURLConnection
-    conn.connect()
-    GSON.fromJson<JsonObject>(InputStreamReader(conn.inputStream))
-}
-
-val mcGameVersionManifest: CompletableFuture<JsonObject> by lazy { requestJson(URI("https://launchermeta.mojang.com/mc/game/version_manifest.json")) }
+val mcGameVersionManifest: CompletableFuture<JsonObject> by lazy { requestJson<JsonObject>(URI("https://launchermeta.mojang.com/mc/game/version_manifest.json")) }
 val mcVersions: CompletableFuture<Map<String, VersionInfo>> by lazy { getVersions() }
 
 fun getVersionInfo(id: String): CompletableFuture<VersionInfo?> = mcVersions.thenApply { it[id] }
@@ -54,7 +44,7 @@ private fun cachedFile(url: URI): Path? {
 
 private fun getOrFetch(url: URI): CompletableFuture<Path> {
     val path = cachedFile(url) ?: throw IllegalArgumentException("$url is not cacheable")
-    return download(url.toURL(), path).thenApply { path }
+    return download(url, path).thenApply { path }
 }
 
 private val versionManifests = ConcurrentHashMap<String, CompletableFuture<JsonObject>>()
@@ -102,13 +92,13 @@ fun downloadLibraries(id: String): CompletableFuture<List<Path>> = getVersionMan
 private fun downloadLibrary(obj: JsonObject): CompletableFuture<Path> {
     val artifact = obj["artifact"]!!.asJsonObject
     val path = LIBS_CACHE_DIR.resolve(artifact["path"]!!.asString)
-    return download(URL(artifact["url"]!!.asString), path, null).thenApply { path }
+    return download(URI(artifact["url"]!!.asString), path, null).thenApply { path }
 }
 
 private fun startDownload(downloads: JsonObject?, download: String, file: Path, listener: ((DownloadProgress) -> Unit)?): CompletableFuture<Boolean> {
     if (downloads == null) return CompletableFuture.completedFuture(false)
     val url = downloads[download]?.asJsonObject?.get("url")?.asString ?: return CompletableFuture.completedFuture(false)
-    return download(URL(url), file, listener).thenApply { true }
+    return download(URI(url), file, listener).thenApply { true }
 }
 
 private val inProgress = mutableMapOf<Path, CompletableFuture<Path>>()

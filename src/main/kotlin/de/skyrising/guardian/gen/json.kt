@@ -57,8 +57,28 @@ data class ArtifactSpec(val group: String, val id: String, val version: String, 
             "$group:$id:$version"
         }
     }
+
+    companion object {
+        fun of(spec: String): ArtifactSpec {
+            val parts = spec.split(":")
+            if (parts.size == 4) {
+                return ArtifactSpec(parts[0], parts[1], parts[2], parts[3])
+            }
+            if (parts.size != 3) throw IllegalArgumentException("Expected group:id:version, got '$spec'")
+            return ArtifactSpec(parts[0], parts[1], parts[2])
+        }
+    }
 }
-data class MavenArtifact(val mavenUrl: URI, val artifact: ArtifactSpec) {}
+data class MavenArtifact(val mavenUrl: URI, val artifact: ArtifactSpec) {
+    fun getPath(): String {
+        val artifact = artifact
+        val id = artifact.id
+        val version = artifact.version
+        val classifier = artifact.classifier?.let { "-$it" } ?: ""
+        return "${artifact.group.replace('.', '/')}/$id/$version/$id-$version$classifier.jar"
+    }
+    fun getURL(): URI = mavenUrl.resolve(getPath())
+}
 data class DecompilerMap(val map: Map<Decompiler, MavenArtifact>)
 
 val GSON: Gson = GsonBuilder()
@@ -111,6 +131,9 @@ val GSON: Gson = GsonBuilder()
     .registerTypeAdapter<JsonPrimitive, MappingProvider> { prim, _, _ ->
         when (val s = prim.asString) {
             "mojang" -> MappingProvider.MOJANG
+            "fabric-intermediary" -> MappingProvider.FABRIC_INTERMEDIARY
+            "legacy-intermediary" -> MappingProvider.LEGACY_INTERMEDIARY
+            "quilt-intermediary" -> MappingProvider.QUILT_INTERMEDIARY
             else -> throw IllegalArgumentException("Unknown mapping provider '$s'")
         }
     }
@@ -118,12 +141,7 @@ val GSON: Gson = GsonBuilder()
         getDecompiler(prim.asString)
     }
     .registerTypeAdapter<JsonPrimitive, ArtifactSpec> { prim, _, _ ->
-        val parts = prim.asString.split(":")
-        if (parts.size == 4) {
-            return@registerTypeAdapter ArtifactSpec(parts[0], parts[1], parts[2], parts[3])
-        }
-        if (parts.size != 3) throw IllegalArgumentException("Expected group:id:version, got '${prim.asString}'")
-        ArtifactSpec(parts[0], parts[1], parts[2])
+        ArtifactSpec.of(prim.asString)
     }
     .registerTypeAdapter<JsonPrimitive, ZonedDateTime> { prim, _, _ ->
         DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(prim.asString, ZonedDateTime::from)

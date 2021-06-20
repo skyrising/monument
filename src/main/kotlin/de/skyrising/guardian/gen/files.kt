@@ -1,10 +1,11 @@
 package de.skyrising.guardian.gen
 
+import com.google.gson.JsonElement
 import java.io.BufferedInputStream
 import java.io.IOException
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.CompletableFuture
@@ -12,17 +13,17 @@ import java.util.concurrent.ConcurrentHashMap
 
 data class DownloadProgress(val length: Long, val progress: Long)
 
-private val DOWNLOADS = ConcurrentHashMap<URL, CompletableFuture<Unit>>()
+private val DOWNLOADS = ConcurrentHashMap<URI, CompletableFuture<Unit>>()
 
-fun download(url: URL, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = DOWNLOADS.computeIfAbsent(url) {
+fun download(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = DOWNLOADS.computeIfAbsent(url) {
     startDownload(it, file, listener)
 }
 
-private fun startDownload(url: URL, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = supplyAsync {
+private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = supplyAsync {
     if (Files.exists(file)) return@supplyAsync
     println("Downloading $url")
     Files.createDirectories(file.parent)
-    val conn = url.openConnection() as HttpURLConnection
+    val conn = url.toURL().openConnection() as HttpURLConnection
     conn.connect()
     val len = conn.getHeaderFieldLong("Content-Length", -1)
     BufferedInputStream(conn.inputStream).use { input ->
@@ -38,6 +39,13 @@ private fun startDownload(url: URL, file: Path, listener: ((DownloadProgress) ->
             }
         }
     }
+}
+
+inline fun <reified T : JsonElement> requestJson(url: URI): CompletableFuture<T> = supplyAsync {
+    println("Fetching $url")
+    val conn = url.toURL().openConnection() as HttpURLConnection
+    conn.connect()
+    GSON.fromJson<T>(InputStreamReader(conn.inputStream))
 }
 
 fun rmrf(path: Path) {
@@ -256,16 +264,12 @@ fun useResourceFileSystem(cls: Class<*>, fn: (Path) -> Unit) {
     }
 }
 
-fun getMavenArtifact(mvnArtifact: MavenArtifact): CompletableFuture<URL> {
-    val artifact = mvnArtifact.artifact
-    val id = artifact.id
-    val version = artifact.version
-    val classifier = artifact.classifier?.let { "-$it" } ?: ""
-    val path = "${artifact.group.replace('.', '/')}/$id/$version/$id-$version$classifier.jar"
+fun getMavenArtifact(mvnArtifact: MavenArtifact): CompletableFuture<URI> {
+    val path = mvnArtifact.getPath()
     val filePath = JARS_DIR.resolve("libraries").resolve(path)
-    if (Files.exists(filePath)) return CompletableFuture.completedFuture(filePath.toUri().toURL())
-    val url = mvnArtifact.mavenUrl.resolve(path).toURL()
-    return download(url, filePath).thenApply { filePath.toUri().toURL() }
+    if (Files.exists(filePath)) return CompletableFuture.completedFuture(filePath.toUri())
+    val url = mvnArtifact.mavenUrl.resolve(path)
+    return download(url, filePath).thenApply { filePath.toUri() }
 }
 
 private object Dummy
