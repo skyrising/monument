@@ -85,6 +85,12 @@ fun getJarFileSystem(jar: Path): FileSystem {
     return FileSystems.newFileSystem(fsUri, mapOf<String, Any>())
 }
 
+fun createJarFileSystem(jar: Path): FileSystem {
+    val uri = jar.toUri()
+    val fsUri = URI("jar:${uri.scheme}", uri.userInfo, uri.host, uri.port, uri.path, uri.query, uri.fragment)
+    return FileSystems.newFileSystem(fsUri, mapOf<String, Any>("create" to "true"))
+}
+
 interface PostProcessor {
     fun matches(path: Path): Boolean
     fun process(path: Path, content: ByteArray): Pair<Path, ByteArray>

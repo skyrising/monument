@@ -1,9 +1,7 @@
 package de.skyrising.guardian.gen
 
 import com.google.gson.JsonArray
-import cuchaz.enigma.Enigma
 import cuchaz.enigma.ProgressListener
-import cuchaz.enigma.classprovider.ClasspathClassProvider
 import cuchaz.enigma.translation.mapping.EntryMapping
 import cuchaz.enigma.translation.mapping.serde.MappingFormat
 import cuchaz.enigma.translation.mapping.tree.EntryTree
@@ -117,25 +115,5 @@ fun mergeMappings(version: String, vararg mappings: EntryTree<EntryMapping>): En
         val merged = HashEntryTree<EntryMapping>()
         for (mapping in mappings) for (entry in mapping) merged.insert(entry.entry, entry.value)
         merged
-    }
-}
-
-fun mapJar(version: String, input: Path, mappings: EntryTree<EntryMapping>, provider: String): CompletableFuture<Path> {
-    val output = JARS_MAPPED_DIR.resolve(provider).resolve(JARS_DIR.relativize(input))
-    return mapJar(version, input, output, mappings).thenApply { output }
-}
-
-fun mapJar(version: String, input: Path, output: Path, mappings: EntryTree<EntryMapping>) = supplyAsync {
-    if (Files.exists(output)) return@supplyAsync
-    val enigma = Enigma.create()
-    val project = enigma.openJar(input, ClasspathClassProvider(), ProgressListener.none())
-    project.setMappings(mappings)
-    output(version, "Remapping jar...")
-    val jar = Timer(version, "remapJar").use {
-        project.exportRemappedJar(VersionedProgressListener(version, "Deobfuscating"))
-    }
-    Timer(version, "writeRemappedJar").use {
-        Files.createDirectories(output.parent)
-        jar.write(output, VersionedProgressListener(version, "Writing deobfuscated jar"))
     }
 }
