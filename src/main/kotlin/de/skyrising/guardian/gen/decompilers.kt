@@ -1,7 +1,12 @@
 package de.skyrising.guardian.gen
 
+import org.benf.cfr.reader.api.CfrDriver
+import org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler
+import org.jetbrains.java.decompiler.main.extern.IFernflowerPreferences
 import java.io.File
+import java.io.FileNotFoundException
 import java.net.URI
+import java.net.URL
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
@@ -14,30 +19,29 @@ interface Decompiler {
     fun decompile(artifact: MavenArtifact?, version: String, jar: Path, outputDir: Path, cp: List<Path>? = null): CompletableFuture<Path>
 
     companion object {
-        val CFR = object : JavaDecompiler("cfr", false /* Workaround for https://github.com/leibnitz27/cfr/issues/250 */) {
-            override fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?) = supplyAsyncDecompile {
-                outputTo(version) {
-                    Timer(version, "decompile").use {
-                        val options = mutableMapOf(
-                            "showversion" to "false",
-                            "silent" to "false",
-                            "comments" to "false",
-                            "outputpath" to outputDir.toAbsolutePath().toString()
-                        )
-                        if (cp != null && cp.isNotEmpty()) options["extraclasspath"] = formatClassPath(cp)
-                        val builder = Class.forName("org.benf.cfr.reader.api.CfrDriver\$Builder", true, classLoader).newInstance()
-                        builder.javaClass.getMethod("withOptions", Map::class.java).invoke(builder, options)
-                        val driver = builder.javaClass.getMethod("build").invoke(builder)
-                        driver.javaClass.getMethod("analyse", List::class.java).invoke(driver, listOf(jar.toAbsolutePath().toString()))
-                    }
-                }
-                outputDir
-            }
+        val CFR = JavaDecompiler("cfr", "de.skyrising.guardian.gen.CfrDecompileTask", false /* Workaround for https://github.com/leibnitz27/cfr/issues/250 */)
+        val FERNFLOWER = JavaDecompiler("fernflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
+        val FORGEFLOWER = JavaDecompiler("forgeflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
+        val FABRIFLOWER = JavaDecompiler("fabriflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
+        val QUILTFLOWER = JavaDecompiler("quiltflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
+    }
+}
+
+@Suppress("unused")
+class CfrDecompileTask : DecompileTask {
+    override fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path {
+        Timer(version, "decompile").use {
+            val options = mutableMapOf(
+                "showversion" to "false",
+                "silent" to "false",
+                "comments" to "false",
+                "outputpath" to outputDir.toAbsolutePath().toString()
+            )
+            if (cp != null && cp.isNotEmpty()) options["extraclasspath"] = formatClassPath(cp)
+            val driver = CfrDriver.Builder().withOptions(options).build()
+            driver.analyse(listOf(jar.toAbsolutePath().toString()))
         }
-        val FERNFLOWER = FernflowerDecompiler("fernflower")
-        val FORGEFLOWER = FernflowerDecompiler("forgeflower")
-        val FABRIFLOWER = FernflowerDecompiler("fabriflower")
-        val QUILTFLOWER = FernflowerDecompiler("quiltflower")
+        return outputDir
     }
 }
 
@@ -45,10 +49,8 @@ abstract class CommonDecompiler(override val name: String) : Decompiler {
     override fun toString() = "CommonDecompiler($name)"
 }
 
-abstract class JavaDecompiler(name: String, private val allowSharing: Boolean = true) : CommonDecompiler(name) {
+class JavaDecompiler(name: String, private val taskClassName: String, private val allowSharing: Boolean = true) : CommonDecompiler(name) {
     private val classLoaders = ConcurrentHashMap<URI, ClassLoader>()
-
-    abstract fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?): CompletableFuture<Path>
 
     override fun decompile(
         artifact: MavenArtifact?,
@@ -57,23 +59,77 @@ abstract class JavaDecompiler(name: String, private val allowSharing: Boolean = 
         outputDir: Path,
         cp: List<Path>?
     ): CompletableFuture<Path> = getMavenArtifact(artifact!!).thenCompose { url: URI ->
-        val classLoader = if (allowSharing) {
-            classLoaders.computeIfAbsent(url, this::createClassLoader)
-        } else {
-            createClassLoader(url)
+        supplyAsyncDecompile {
+            outputTo(version) {
+                val classLoader = if (allowSharing) {
+                    classLoaders.computeIfAbsent(url, this::createClassLoader)
+                } else {
+                    createClassLoader(url)
+                }
+                val task = Class.forName(taskClassName, true, classLoader).newInstance()
+                if (task.javaClass.classLoader != classLoader) {
+                    throw IllegalStateException("$taskClassName loaded by incorrect class loader: ${task.javaClass.classLoader}")
+                }
+                if (task !is DecompileTask) throw IllegalStateException("$task is not a DecompileTask")
+                task.decompile(version, jar, outputDir, cp)
+            }
         }
-        decompile(classLoader, version, jar, outputDir, cp)
     }
 
-    private fun createClassLoader(url: URI): ClassLoader = URLClassLoader(arrayOf(url.toURL()))
+    private fun createClassLoader(url: URI) = DecompileTaskClassLoader(URLClassLoader(arrayOf(
+        getBaseUrl(JavaDecompiler::class.java),
+        url.toURL()
+    )))
 
     override fun toString() = "JavaDecompiler($name)"
-
 }
 
-open class FernflowerDecompiler(name: String) : JavaDecompiler(name) {
+class DecompileTaskClassLoader(parent: ClassLoader) : ClassLoader(parent) {
+    override fun loadClass(name: String, resolve: Boolean): Class<*> {
+        if (!shouldLoad(name)) {
+            return super.loadClass(name, resolve)
+        }
+        synchronized(getClassLoadingLock(name)) {
+            var c = findLoadedClass(name)
+            if (c == null) {
+                val path = name.replace('.', '/') + ".class"
+                val stream = parent.getResourceAsStream(path)
+                c = if (stream == null) {
+                    super.loadClass(name, false)
+                } else {
+                    val bytes = stream.readBytes()
+                    defineClass(name, bytes, 0, bytes.size)
+                }
+            }
+            if (c == null) throw ClassNotFoundException(name)
+            if (resolve) resolveClass(c)
+            return c
+        }
+    }
+
+    private fun shouldLoad(name: String): Boolean {
+        if (!name.startsWith("de.skyrising.guardian.gen.")) return false
+        val outerClass = name.substringBefore('$')
+        if (outerClass == DecompileTask::class.java.name) return false
+        return outerClass.endsWith("DecompileTask")
+    }
+}
+
+private fun getBaseUrl(cls: Class<*>): URL {
+    val path = "/" + cls.name.replace('.', '/') + ".class"
+    val url = cls.getResource(path)?.toExternalForm() ?: throw FileNotFoundException("Can't find $path")
+    return URL(url.substring(0, url.lastIndexOf(path)))
+}
+
+interface DecompileTask {
+    fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path
+}
+
+@Suppress("unused")
+open class FernflowerDecompileTask : DecompileTask {
     protected fun getArgs(jar: Path, outputDir: Path, cp: List<Path>?, defaults: Map<String, Any>): Array<String> {
         val args = mutableListOf("-ind=    ")
+        //if (defaults.containsKey("iec")) args.add("-iec=1")
         val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
         executor.decompileParallelism = 4
         if (cp != null) {
@@ -84,29 +140,19 @@ open class FernflowerDecompiler(name: String) : JavaDecompiler(name) {
         return args.toTypedArray()
     }
 
-    private fun getDefaultOptions(classLoader: ClassLoader): Map<String, Any> {
-        val prefsCls = Class.forName("org.jetbrains.java.decompiler.main.extern.IFernflowerPreferences", true, classLoader)
-        return prefsCls.getField("DEFAULTS").get(null) as Map<String, Any>
-    }
-
-    override fun decompile(classLoader: ClassLoader, version: String, jar: Path, outputDir: Path, cp: List<Path>?) = supplyAsyncDecompile {
-        outputTo(version) {
-            val clsOutput = outputDir.resolve("bin")
-            val srcOutput = outputDir.resolve("src")
-            Timer(version, "decompile.extractClasses").use {
-                getJarFileSystem(jar).use {
-                    copy(it.getPath("/"), clsOutput)
-                }
-                Files.createDirectories(srcOutput)
+    override fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path {
+        val clsOutput = outputDir.resolve("bin")
+        val srcOutput = outputDir.resolve("src")
+        Timer(version, "decompile.extractClasses").use {
+            getJarFileSystem(jar).use {
+                copy(it.getPath("/"), clsOutput)
             }
-            Timer(version, "decompile").use {
-                val defaults = getDefaultOptions(classLoader)
-                val cls = Class.forName("org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler", true, classLoader)
-                val main = cls.getMethod("main", Array<String>::class.java)
-                main.invoke(null, getArgs(clsOutput, srcOutput, cp, defaults))
-                srcOutput
-            }
+            Files.createDirectories(srcOutput)
         }
+        Timer(version, "decompile").use {
+            ConsoleDecompiler.main(getArgs(clsOutput, srcOutput, cp, IFernflowerPreferences.DEFAULTS))
+        }
+        return srcOutput
     }
 }
 
