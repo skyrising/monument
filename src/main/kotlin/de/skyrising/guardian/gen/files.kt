@@ -280,12 +280,12 @@ fun getMavenArtifact(mvnArtifact: MavenArtifact): CompletableFuture<URI> {
 
 private object Dummy
 
-fun extractGradle(id: String, out: Path): CompletableFuture<Unit> = supplyAsync {
+fun extractGradle(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync {
     useResourceFileSystem(Dummy::class.java) {
         copy(it.resolve("gradle_env"), out, StandardCopyOption.REPLACE_EXISTING)
     }
 }.thenCompose {
-    generateGradleBuild(id, out)
+    generateGradleBuild(version, out)
 }
 
 fun getMonumentClassRoot(): Path? {

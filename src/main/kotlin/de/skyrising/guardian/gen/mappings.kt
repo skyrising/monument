@@ -18,23 +18,22 @@ val JARS_MAPPED_DIR: Path = JARS_DIR.resolve("mapped")
 interface MappingProvider {
     val name: String
     val format: MappingFormat
-    fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<EntryTree<EntryMapping>?>
-    fun supportsVersion(version: String, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<Boolean> {
+    fun getMappings(version: VersionInfo, mappings: String?, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<EntryTree<EntryMapping>?>
+    fun supportsVersion(version: VersionInfo, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<Boolean> {
         return getLatestMappings(version, target, cache).thenApply { it != null }
     }
-    fun getPath(cache: Path, version: String): Path = cache.resolve(name).resolve(version)
-    fun getLatestMappingVersion(version: String, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<String>
-    fun getLatestMappings(version: String, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<EntryTree<EntryMapping>?> {
+    fun getPath(cache: Path, version: VersionInfo, mappings: String?): Path = cache.resolve(name).resolve(version.id)
+    fun getLatestMappingVersion(version: VersionInfo, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<String?>
+    fun getLatestMappings(version: VersionInfo, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<EntryTree<EntryMapping>?> {
         return getLatestMappingVersion(version, target, cache).thenCompose { mv ->
-            if (mv == null) return@thenCompose CompletableFuture.completedFuture(null as EntryTree<EntryMapping>?)
-            getMappings(mv, target, cache)
+            getMappings(version, mv, target, cache)
         }
     }
     companion object {
         val MOJANG = object : CommonMappingProvider("mojang", MappingFormat.PROGUARD, "txt") {
-            override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?> =
+            override fun getUrl(cache: Path, version: VersionInfo, mappings: String?, target: MappingTarget): CompletableFuture<URI?> =
                 if (target == MappingTarget.MERGED) CompletableFuture.completedFuture(null)
-                else getVersionManifest(mappingVersion).thenApply { manifest ->
+                else getVersionManifest(version).thenApply { manifest ->
                     manifest["downloads"]?.asJsonObject?.get(target.id + "_mappings")?.asJsonObject?.get("url")?.asString?.let { URI(it) }
                 }
         }
@@ -42,7 +41,7 @@ interface MappingProvider {
         val LEGACY_INTERMEDIARY = IntermediaryMappingProvider("legacy", URI("https://meta.legacyfabric.net/v2/"), URI("https://maven.legacyfabric.net/"))
         val QUILT_INTERMEDIARY = IntermediaryMappingProvider("quilt", URI("https://meta.quiltmc.org/v3/"), URI("https://maven.quiltmc.org/repository/release/"))
         val YARN = object : JarMappingProvider("yarn", MappingFormat.TINY_V2) {
-            override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?> {
+            override fun getUrl(cache: Path, version: VersionInfo, mappings: String?, target: MappingTarget): CompletableFuture<URI?> {
                 TODO("Not yet implemented")
             }
         }
@@ -50,12 +49,14 @@ interface MappingProvider {
 }
 
 abstract class CommonMappingProvider(override val name: String, override val format: MappingFormat, private val ext: String) : MappingProvider {
-    abstract fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?>
-    override fun supportsVersion(version: String, target: MappingTarget, cache: Path): CompletableFuture<Boolean> = getUrl(getPath(cache, version), version, target).thenApply { it != null }
-    override fun getLatestMappingVersion(version: String, target: MappingTarget, cache: Path): CompletableFuture<String> = CompletableFuture.completedFuture(version)
-    override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> {
-        val mappingsFile = getPath(cache, mappingVersion).resolve("mappings-${target.id}.${ext}")
-        return getUrl(getPath(cache, mappingVersion), mappingVersion, target).thenCompose { url ->
+    abstract fun getUrl(cache: Path, version: VersionInfo, mappings: String?, target: MappingTarget): CompletableFuture<URI?>
+    override fun supportsVersion(version: VersionInfo, target: MappingTarget, cache: Path): CompletableFuture<Boolean> = getLatestMappingVersion(version, target, cache).thenCompose { mappings ->
+        getUrl(getPath(cache, version, mappings), version, mappings, target).thenApply { it != null }
+    }
+    override fun getLatestMappingVersion(version: VersionInfo, target: MappingTarget, cache: Path): CompletableFuture<String?> = CompletableFuture.completedFuture(null)
+    override fun getMappings(version: VersionInfo, mappings: String?, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> {
+        val mappingsFile = getPath(cache, version, mappings).resolve("mappings-${target.id}.${ext}")
+        return getUrl(getPath(cache, version, mappings), version, mappings, target).thenCompose { url ->
             if (url == null) CompletableFuture.completedFuture(Unit) else download(url, mappingsFile)
         }.thenApplyAsync {
             if (!Files.exists(mappingsFile)) return@thenApplyAsync null
@@ -67,24 +68,24 @@ abstract class CommonMappingProvider(override val name: String, override val for
 }
 
 abstract class JarMappingProvider(override val name: String, override val format: MappingFormat) : CommonMappingProvider(name, format, "jar") {
-    open fun getFile(version: String, target: MappingTarget, jar: FileSystem): Path = jar.getPath("mappings/mappings.tiny")
-    override fun getMappings(mappingVersion: String, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> {
-        val jarFile = getPath(cache, mappingVersion).resolve("mappings-${target.id}.jar")
-        return getUrl(getPath(cache, mappingVersion), mappingVersion, target).thenCompose { url ->
+    open fun getFile(version: VersionInfo, mappings: String?, target: MappingTarget, jar: FileSystem): Path = jar.getPath("mappings/mappings.tiny")
+    override fun getMappings(version: VersionInfo, mappings: String?, target: MappingTarget, cache: Path): CompletableFuture<EntryTree<EntryMapping>?> {
+        val jarFile = getPath(cache, version, mappings).resolve("mappings-${target.id}.jar")
+        return getUrl(getPath(cache, version, mappings), version, mappings, target).thenCompose { url ->
             if (url == null) CompletableFuture.completedFuture(Unit) else download(url, jarFile)
         }.thenApplyAsync {
             if (!Files.exists(jarFile)) return@thenApplyAsync null
             getJarFileSystem(jarFile).use { fs ->
-                format.read(getFile(mappingVersion, target, fs), ProgressListener.none(), null)
+                format.read(getFile(version, mappings, target, fs), ProgressListener.none(), null)
             }
         }
     }
 }
 
 class IntermediaryMappingProvider(prefix: String, private val meta: URI, private val maven: URI) : JarMappingProvider("$prefix-intermediary", MappingFormat.TINY_V2) {
-    override fun getUrl(cache: Path, mappingVersion: String, target: MappingTarget): CompletableFuture<URI?> {
+    override fun getUrl(cache: Path, version: VersionInfo, mappings: String?, target: MappingTarget): CompletableFuture<URI?> {
         if (target != MappingTarget.MERGED) return CompletableFuture.completedFuture(null)
-        return requestJson<JsonArray>(meta.resolve("versions/intermediary/$mappingVersion")).handle { it, e ->
+        return requestJson<JsonArray>(meta.resolve("versions/intermediary/${version.id}")).handle { it, e ->
             if (e != null) null else it
         }.thenApply {
             if (it == null || it.size() == 0) return@thenApply null
@@ -98,13 +99,13 @@ enum class MappingTarget(val id: String) {
     CLIENT("client"), SERVER("server"), MERGED("merged");
 }
 
-fun getMappings(provider: MappingProvider, version: String, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<EntryTree<EntryMapping>?> {
-    return provider.getMappings(version, target, cache).thenCompose {
+fun getMappings(provider: MappingProvider, version: VersionInfo, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<EntryTree<EntryMapping>?> {
+    return provider.getLatestMappings(version, target, cache).thenCompose {
         if (it != null || target != MappingTarget.MERGED) return@thenCompose CompletableFuture.completedFuture(it)
-        val client = provider.getMappings(version, MappingTarget.CLIENT, cache)
-        val server = provider.getMappings(version, MappingTarget.SERVER, cache)
+        val client = provider.getLatestMappings(version, MappingTarget.CLIENT, cache)
+        val server = provider.getLatestMappings(version, MappingTarget.SERVER, cache)
         CompletableFuture.allOf(client, server).thenApply {
-            mergeMappings(version,client.get() ?: return@thenApply null, server.get() ?: return@thenApply null)
+            mergeMappings(version.id,client.get() ?: return@thenApply null, server.get() ?: return@thenApply null)
         }
     }
 }

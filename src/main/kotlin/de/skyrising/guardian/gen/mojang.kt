@@ -7,10 +7,10 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.time.ZonedDateTime
 import java.util.*
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 
 val JARS_CLIENT_DIR: Path = JARS_DIR.resolve("client")
 val JARS_SERVER_DIR: Path = JARS_DIR.resolve("server")
@@ -28,12 +28,14 @@ data class VersionInfo(val id: String, val type: String, val url: URI, val time:
     override fun compareTo(other: VersionInfo?) = releaseTime.compareTo(other?.releaseTime)
 }
 
-private fun getVersions(): CompletableFuture<Map<String, VersionInfo>> = mcGameVersionManifest.thenApply {
-    val set = GSON.fromJson<TreeSet<VersionInfo>>(it.require("versions"))
+fun parseVersionManifest(obj: JsonObject): Map<String, VersionInfo> {
+    val set = GSON.fromJson<TreeSet<VersionInfo>>(obj.require("versions"))
     val map = LinkedHashMap<String, VersionInfo>()
     for (version in set) map[version.id] = version
-    map
+    return map
 }
+
+private fun getVersions(): CompletableFuture<Map<String, VersionInfo>> = mcGameVersionManifest.thenApply(::parseVersionManifest)
 
 private fun cachedFile(url: URI): Path? {
     if (url.host != "launchermeta.mojang.com" || !url.path.startsWith("/v1/packages/")) return null
@@ -43,28 +45,24 @@ private fun cachedFile(url: URI): Path? {
 }
 
 private fun getOrFetch(url: URI): CompletableFuture<Path> {
+    if (url.scheme == "file") return CompletableFuture.completedFuture(Paths.get(url))
     val path = cachedFile(url) ?: throw IllegalArgumentException("$url is not cacheable")
     return download(url, path).thenApply { path }
 }
 
-private val versionManifests = ConcurrentHashMap<String, CompletableFuture<JsonObject>>()
-
-private fun fetchVersionManifest(id: String) = getVersionInfo(id).thenCompose {
-    if (it == null) return@thenCompose null
-    getOrFetch(it.url).thenApply { path ->
+fun getVersionManifest(version: VersionInfo): CompletableFuture<JsonObject> {
+    return getOrFetch(version.url).thenApply { path ->
         Files.newBufferedReader(path, StandardCharsets.UTF_8).use { reader ->
             GSON.fromJson<JsonObject>(reader)
         }
     }
 }
 
-fun getVersionManifest(id: String) = versionManifests.computeIfAbsent(id, ::fetchVersionManifest)
-
-fun downloadFile(id: String, download: String, file: Path, listener: ((DownloadProgress) -> Unit)? = null): CompletableFuture<Boolean> = getVersionManifest(id).thenCompose {
+fun downloadFile(version: VersionInfo, download: String, file: Path, listener: ((DownloadProgress) -> Unit)? = null): CompletableFuture<Boolean> = getVersionManifest(version).thenCompose {
     startDownload(it["downloads"]?.asJsonObject, download, file, listener)
 }
 
-fun downloadLibraries(id: String): CompletableFuture<List<Path>> = getVersionManifest(id).thenCompose {
+fun downloadLibraries(version: VersionInfo): CompletableFuture<List<Path>> = getVersionManifest(version).thenCompose {
     val libs = it["libraries"]?.asJsonArray ?: return@thenCompose CompletableFuture.completedFuture(emptyList<Path>())
     val futures = mutableListOf<CompletableFuture<Path>>()
     for (lib in libs) {
@@ -103,14 +101,15 @@ private fun startDownload(downloads: JsonObject?, download: String, file: Path, 
 
 private val inProgress = mutableMapOf<Path, CompletableFuture<Path>>()
 
-fun getJar(id: String, target: MappingTarget): CompletableFuture<Path> {
+fun getJar(version: VersionInfo, target: MappingTarget): CompletableFuture<Path> {
+    val id = version.id
     if (target == MappingTarget.MERGED) {
         val merged = JARS_MERGED_DIR.resolve("$id.jar")
         val ip = inProgress[merged]
         if (ip != null) return ip
         if (Files.exists(merged)) return CompletableFuture.completedFuture(merged)
-        val client = getJar(id, MappingTarget.CLIENT)
-        val server = getJar(id, MappingTarget.SERVER)
+        val client = getJar(version, MappingTarget.CLIENT)
+        val server = getJar(version, MappingTarget.SERVER)
         return deduplicate(inProgress, merged, CompletableFuture.allOf(client, server).thenCompose {
             mergeJars(id, client.get(), server.get(), merged)
         }.thenApply {
@@ -122,12 +121,13 @@ fun getJar(id: String, target: MappingTarget): CompletableFuture<Path> {
     val ip = inProgress[path]
     if (ip != null) return ip
     if (Files.exists(path)) return CompletableFuture.completedFuture(path)
-    return deduplicate(inProgress, path, downloadFile(id, target.id, path).thenApply { path })
+    return deduplicate(inProgress, path, downloadFile(version, target.id, path).thenApply { path })
 }
 
 private data class Dependency(val dependency: String, val type: String = "implementation")
 
-fun generateGradleBuild(id: String, dir: Path): CompletableFuture<Unit> = getVersionManifest(id).thenApply { manifest ->
+fun generateGradleBuild(version: VersionInfo, dir: Path): CompletableFuture<Unit> = getVersionManifest(version)
+    .thenApply { manifest ->
     PrintWriter(Files.newBufferedWriter(dir.resolve("build.gradle"), StandardCharsets.UTF_8)).use { out ->
         val libs = manifest["libraries"]!!.asJsonArray
         val byCondition = mutableMapOf<String, MutableSet<Dependency>>()

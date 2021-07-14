@@ -39,6 +39,7 @@ fun main(args: Array<String>) {
     val helpArg = parser.accepts("help").forHelp()
     val nonOptionsArg = parser.nonOptions()
     val recommitArg = parser.acceptsAll(listOf("r", "recommit"), "Recommit more of the history than necessary").withOptionalArg().ofType(String::class.java)
+    val manifestArg = parser.acceptsAll(listOf("m", "manifest"), "Specify a custom version manifest file").withOptionalArg().ofType(String::class.java)
     fun printUsage() {
         System.err.println("Usage: monument [options] [branch] [action]")
         parser.printHelpOn(System.err)
@@ -46,6 +47,7 @@ fun main(args: Array<String>) {
     var recommitFrom: String? = null
     var branch = "master"
     var action = "update"
+    var manifest: Path? = null
     try {
         val options = parser.parse(*args)
         if (options.has(helpArg)) {
@@ -56,6 +58,7 @@ fun main(args: Array<String>) {
             recommitFrom = ":base"
             recommitArg.valueOptional(options).ifPresent { recommitFrom = it }
         }
+        manifestArg.valueOptional(options).ifPresent { manifest = Paths.get(it) }
         val nonOptions = nonOptionsArg.values(options)
         when (nonOptions.size) {
             0 -> {}
@@ -78,7 +81,7 @@ fun main(args: Array<String>) {
         printUsage()
         return
     }
-    update(branch, action, recommitFrom)
+    update(branch, action, recommitFrom, manifest)
 }
 
 fun readConfig(): Config {
@@ -109,7 +112,7 @@ fun readConfig(): Config {
     return GSON.fromJson(json)
 }
 
-fun update(branch: String, action: String, recommitFrom: String?) {
+fun update(branch: String, action: String, recommitFrom: String?, manifest: Path?) {
     val startTime = System.currentTimeMillis()
     val check = action == "check"
     if (!check) {
@@ -139,7 +142,11 @@ fun update(branch: String, action: String, recommitFrom: String?) {
     }
     val (mappings, decompiler, postProcessors) = sourceConfig
 
-    val versions = mcVersions.join()
+    val versions = if (manifest != null) {
+        parseVersionManifest(GSON.fromJson(Files.newBufferedReader(manifest)))
+    } else {
+        mcVersions.join()
+    }
     fun getVersion(id: String?): VersionInfo? {
         if (id == null) return null
         return versions[id] ?: throw IllegalArgumentException("Unknown version '${id}'")
@@ -155,9 +162,9 @@ fun update(branch: String, action: String, recommitFrom: String?) {
     }
     println("Filtering version list (${spellVersions(branchVersions.size)})")
     val supported = branchVersions.values.parallelStream().filter {
-        immediate { mappings.supportsVersion(it.id, MappingTarget.MERGED) }
-        || immediate { mappings.supportsVersion(it.id, MappingTarget.CLIENT) }
-        || immediate { mappings.supportsVersion(it.id, MappingTarget.SERVER) }
+        immediate { mappings.supportsVersion(it, MappingTarget.MERGED) }
+        || immediate { mappings.supportsVersion(it, MappingTarget.CLIENT) }
+        || immediate { mappings.supportsVersion(it, MappingTarget.SERVER) }
     }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
     println("${spellVersions(supported.size)} supported by '${mappings.name}' mappings")
     val missing = supported.parallelStream().filter {
@@ -173,7 +180,7 @@ fun update(branch: String, action: String, recommitFrom: String?) {
         executor.decompileParallelism = 1
         val futures = mutableListOf<CompletableFuture<Path>>()
         enableOutput()
-        for (version in missing) futures.add(genSources(version.id, mappings, decompiler, decompilerMap, postProcessors))
+        for (version in missing) futures.add(genSources(version, mappings, decompiler, decompilerMap, postProcessors))
         val all = CompletableFuture.allOf(*futures.toTypedArray())
             sysOut.println("Waiting for sources to generate")
         var lines = 0
@@ -223,17 +230,17 @@ fun spellVersions(count: Int) = if (count == 1) "$count version" else "$count ve
 
 fun getSourcePath(version: String, mappings: MappingProvider, decompiler: Decompiler): Path = SOURCES_DIR.resolve(mappings.name).resolve(decompiler.name).resolve(version)
 
-fun getMappedMergedJar(version: String, provider: MappingProvider): CompletableFuture<Path> {
+fun getMappedMergedJar(version: VersionInfo, provider: MappingProvider): CompletableFuture<Path> {
     val jar = getJar(version, MappingTarget.MERGED)
     val mappings = getMappings(provider, version, MappingTarget.MERGED)
     return CompletableFuture.allOf(jar, mappings).thenCompose {
         val m = mappings.get() ?: throw IllegalStateException("No mappings")
-        return@thenCompose mapJar(version, jar.get(), m, provider.name)
+        return@thenCompose mapJar(version.id, jar.get(), m, provider.name)
     }
 }
 
-fun genSources(version: String, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, MavenArtifact>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
-    val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version)
+fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, MavenArtifact>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
+    val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version.id)
     if (Files.exists(out)) rmrf(out)
     Files.createDirectories(out)
     val resOut = out.resolve("src/main/resources")
@@ -246,7 +253,7 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
     ))
     return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
-        time(version, "extractResources", extractResources(jar, resOut, postProcessors))
+        time(version.id, "extractResources", extractResources(jar, resOut, postProcessors))
     }.thenCompose {
         val metaInf = resOut.resolve("META-INF")
         if (Files.exists(metaInf)) rmrf(metaInf)
@@ -255,17 +262,17 @@ fun genSources(version: String, provider: MappingProvider, decompiler: Decompile
         CompletableFuture.allOf(jarFuture, libsFuture).thenCompose {
             val jar = jarFuture.get()
             val libs = libsFuture.get()
-            output(version, "Decompiling with ${decompiler.name}")
+            output(version.id, "Decompiling with ${decompiler.name}")
             val artifact = decompilerMap[decompiler]
-            decompiler.decompile(artifact, version, jar, tmpOut, libs)
+            decompiler.decompile(artifact, version.id, jar, tmpOut, libs)
         }
     }.thenCompose {
-        time(version, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
+        time(version.id, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
     }.thenCompose {
         extractGradle(version, out)
     }.thenApply {
         rmrf(tmpOut)
-        closeOutput(version)
+        closeOutput(version.id)
         out
     }
 }
