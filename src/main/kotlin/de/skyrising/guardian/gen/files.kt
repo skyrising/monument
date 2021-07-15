@@ -140,7 +140,8 @@ val SOURCE_PROCESSOR = object : PostProcessor {
                 comment = true
                 continue
             }
-            if (comment && line.contains("at ")) {
+            val lineComment = line.contains("//") && line.trim().startsWith("//")
+            if ((comment || lineComment) && line.contains("at ")) {
                 if (line.contains("de.skyrising.guardian.gen.")) {
                     it.remove()
                 } else {

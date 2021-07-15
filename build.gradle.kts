@@ -27,6 +27,7 @@ dependencies {
     implementation("org.ow2.asm:asm-tree:9.1")
     implementation("org.ow2.asm:asm-commons:9.1")
     implementation("net.sf.jopt-simple:jopt-simple:6.0-alpha-3")
+    implementation("com.google.jimfs:jimfs:1.2")
 
     compileOnly("org.bitbucket.mstrobel:procyon-compilertools:0.5.36")
     compileOnly("org.quiltmc:quiltflower:1.5.0")

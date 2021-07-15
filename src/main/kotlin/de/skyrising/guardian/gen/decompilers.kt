@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 interface Decompiler {
     val name: String
     val maxParallelism get() = Integer.MAX_VALUE
-    fun decompile(artifacts: List<MavenArtifact>, version: String, jar: Path, outputDir: Path, cp: List<Path>? = null): CompletableFuture<Path>
+    fun decompile(artifacts: List<MavenArtifact>, version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>? = null): CompletableFuture<Path>
 
     companion object {
         val CFR = JavaDecompiler("cfr", "de.skyrising.guardian.gen.CfrDecompileTask", false /* Workaround for https://github.com/leibnitz27/cfr/issues/250 */)
@@ -34,19 +34,20 @@ interface Decompiler {
 
 @Suppress("unused")
 class CfrDecompileTask : DecompileTask {
-    override fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path {
+    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?): Path {
+        val outDir = outputDir(false)
         Timer(version, "decompile").use {
             val options = mutableMapOf(
                 "showversion" to "false",
                 "silent" to "false",
                 "comments" to "false",
-                "outputpath" to outputDir.toAbsolutePath().toString()
+                "outputpath" to outDir.toAbsolutePath().toString()
             )
             if (cp != null && cp.isNotEmpty()) options["extraclasspath"] = formatClassPath(cp)
             val driver = CfrDriver.Builder().withOptions(options).build()
             driver.analyse(listOf(jar.toAbsolutePath().toString()))
         }
-        return outputDir
+        return outDir
     }
 }
 
@@ -61,7 +62,7 @@ class JavaDecompiler(name: String, private val taskClassName: String, private va
         artifacts: List<MavenArtifact>,
         version: String,
         jar: Path,
-        outputDir: Path,
+        outputDir: (Boolean) -> Path,
         cp: List<Path>?
     ): CompletableFuture<Path> = getMavenArtifacts(artifacts).thenCompose { urls: List<URI> ->
         supplyAsyncDecompile {
@@ -127,7 +128,7 @@ private fun getBaseUrl(cls: Class<*>): URL {
 }
 
 interface DecompileTask {
-    fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path
+    fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?): Path
 }
 
 @Suppress("unused")
@@ -145,9 +146,10 @@ open class FernflowerDecompileTask : DecompileTask {
         return args.toTypedArray()
     }
 
-    override fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path {
-        val clsOutput = outputDir.resolve("bin")
-        val srcOutput = outputDir.resolve("src")
+    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?): Path {
+        val outDir = outputDir(false)
+        val clsOutput = outDir.resolve("bin")
+        val srcOutput = outDir.resolve("src")
         Timer(version, "decompile.extractClasses").use {
             getJarFileSystem(jar).use {
                 copy(it.getPath("/"), clsOutput)
@@ -165,44 +167,56 @@ private fun formatClassPath(cp: List<Path>) = cp.joinToString(File.pathSeparator
 
 @Suppress("unused")
 class ProcyonDecompileTask : DecompileTask {
-    override fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path {
-        getJarFileSystem(jar).use {
-            val settings = DecompilerSettings.javaDefaults()
-            settings.isUnicodeOutputEnabled = true
-            settings.typeLoader = ITypeLoader { name, buffer ->
-                val path = it.getPath("$name.class")
-                if (!Files.exists(path)) return@ITypeLoader false
-                val bytes = Files.readAllBytes(path)
-                buffer.putByteArray(bytes, 0, bytes.size)
-                buffer.position(0)
-                true
-            }
-            val errors = TreeMap<String, Throwable>()
-            Files.walk(it.rootDirectories.first())
-                .map(Path::toString)
-                .filter { str -> str.endsWith(".class") && !str.contains('$') }
-                .forEach { p ->
-                    val internalName = p.substring(1, p.length - 6)
-                    println("Decompiling ${internalName.replace('/', '.')})")
-                    val outPath = outputDir.resolve("$internalName.java")
-                    try {
-                        Files.createDirectories(outPath.parent)
-                        Files.newBufferedWriter(outPath).use { outWriter ->
-                            com.strobel.decompiler.Decompiler.decompile(internalName, PlainTextOutput(outWriter), settings)
+    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?): Path {
+        val outDir = outputDir(true)
+        val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
+        executor.decompileParallelism = minOf(
+            Runtime.getRuntime().availableProcessors() - 2,
+            (Runtime.getRuntime().maxMemory() / (768 * 1024 * 1024)).toInt()
+        )
+        Timer(version, "decompile").use {
+            getJarFileSystem(jar).use {
+                val settings = DecompilerSettings.javaDefaults()
+                settings.isUnicodeOutputEnabled = true
+                settings.typeLoader = ITypeLoader { name, buffer ->
+                    val path = it.getPath("$name.class")
+                    if (!Files.exists(path)) return@ITypeLoader false
+                    val bytes = Files.readAllBytes(path)
+                    buffer.putByteArray(bytes, 0, bytes.size)
+                    buffer.position(0)
+                    true
+                }
+                val errors = TreeMap<String, Throwable>()
+                Files.walk(it.rootDirectories.first())
+                    .map(Path::toString)
+                    .filter { str -> str.endsWith(".class") && !str.contains('$') }
+                    .forEach { p ->
+                        val internalName = p.substring(1, p.length - 6)
+                        println("Decompiling ${internalName.replace('/', '.')}")
+                        val outPath = outDir.resolve("$internalName.java")
+                        try {
+                            Files.createDirectories(outPath.parent)
+                            Files.newBufferedWriter(outPath).use { outWriter ->
+                                com.strobel.decompiler.Decompiler.decompile(
+                                    internalName,
+                                    PlainTextOutput(outWriter),
+                                    settings
+                                )
+                            }
+                        } catch (t: Throwable) {
+                            errors[internalName] = t
                         }
-                    } catch (t: Throwable) {
-                        errors[internalName] = t
                     }
+                if (errors.isNotEmpty()) {
+                    val sb = StringBuilder()
+                    for ((file, error) in errors.entries) {
+                        sb.append(file).append('\n')
+                        sb.append(error.message).append('\n')
+                    }
+                    Files.write(outDir.resolve("errors.txt"), sb.toString().toByteArray())
                 }
-            if (errors.isNotEmpty()) {
-                val sb = StringBuilder()
-                for ((file, error) in errors.entries) {
-                    sb.append(file).append('\n')
-                    sb.append(error.message).append('\n')
-                }
-                Files.write(outputDir.resolve("errors.txt"), sb.toString().toByteArray())
             }
         }
-        return outputDir
+        return outDir
     }
 }

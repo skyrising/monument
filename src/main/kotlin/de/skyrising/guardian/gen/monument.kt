@@ -1,10 +1,12 @@
 package de.skyrising.guardian.gen
 
+import com.google.common.jimfs.Jimfs
 import joptsimple.OptionException
 import joptsimple.OptionParser
 import org.tomlj.Toml
 import java.io.IOException
 import java.net.URI
+import java.nio.file.FileSystem
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -249,8 +251,8 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
     Files.createDirectories(out)
     val resOut = out.resolve("src/main/resources")
     val javaOut = out.resolve("src/main/java")
-    val tmpOut = out.resolve("src/main/java-tmp")
-    Files.createDirectories(tmpOut)
+    var tmpOutFs: FileSystem? = null
+    var tmpOutPath: Path? = null
     Files.write(out.resolve(".monument"), listOf(
         "Monument version: $MONUMENT_VERSION",
         "Decompiler: " + decompilerMap[decompiler]!!.first().artifact
@@ -268,14 +270,27 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
             val libs = libsFuture.get()
             output(version.id, "Decompiling with ${decompiler.name}")
             val artifacts = decompilerMap[decompiler]!!
-            decompiler.decompile(artifacts, version.id, jar, tmpOut, libs)
+            val outputDir: (Boolean) -> Path = {
+                if (it) {
+                    val fs = Jimfs.newFileSystem()
+                    tmpOutFs = fs
+                    fs.rootDirectories.first()
+                } else {
+                    val tmpOut = out.resolve("src/main/java-tmp")
+                    tmpOutPath = tmpOut
+                    Files.createDirectories(tmpOut)
+                    tmpOut
+                }
+            }
+            decompiler.decompile(artifacts, version.id, jar, outputDir, libs)
         }
     }.thenCompose {
         time(version.id, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
     }.thenCompose {
         extractGradle(version, out)
     }.thenApply {
-        rmrf(tmpOut)
+        tmpOutFs?.close()
+        tmpOutPath?.apply(::rmrf)
         closeOutput(version.id)
         out
     }
