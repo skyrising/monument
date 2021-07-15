@@ -1,5 +1,8 @@
 package de.skyrising.guardian.gen
 
+import com.strobel.assembler.metadata.ITypeLoader
+import com.strobel.decompiler.DecompilerSettings
+import com.strobel.decompiler.PlainTextOutput
 import org.benf.cfr.reader.api.CfrDriver
 import org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler
 import org.jetbrains.java.decompiler.main.extern.IFernflowerPreferences
@@ -10,13 +13,14 @@ import java.net.URL
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
 interface Decompiler {
     val name: String
     val maxParallelism get() = Integer.MAX_VALUE
-    fun decompile(artifact: MavenArtifact?, version: String, jar: Path, outputDir: Path, cp: List<Path>? = null): CompletableFuture<Path>
+    fun decompile(artifacts: List<MavenArtifact>, version: String, jar: Path, outputDir: Path, cp: List<Path>? = null): CompletableFuture<Path>
 
     companion object {
         val CFR = JavaDecompiler("cfr", "de.skyrising.guardian.gen.CfrDecompileTask", false /* Workaround for https://github.com/leibnitz27/cfr/issues/250 */)
@@ -24,6 +28,7 @@ interface Decompiler {
         val FORGEFLOWER = JavaDecompiler("forgeflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
         val FABRIFLOWER = JavaDecompiler("fabriflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
         val QUILTFLOWER = JavaDecompiler("quiltflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
+        val PROCYON = JavaDecompiler("procyon", "de.skyrising.guardian.gen.ProcyonDecompileTask")
     }
 }
 
@@ -50,21 +55,21 @@ abstract class CommonDecompiler(override val name: String) : Decompiler {
 }
 
 class JavaDecompiler(name: String, private val taskClassName: String, private val allowSharing: Boolean = true) : CommonDecompiler(name) {
-    private val classLoaders = ConcurrentHashMap<URI, ClassLoader>()
+    private val classLoaders = ConcurrentHashMap<List<URI>, ClassLoader>()
 
     override fun decompile(
-        artifact: MavenArtifact?,
+        artifacts: List<MavenArtifact>,
         version: String,
         jar: Path,
         outputDir: Path,
         cp: List<Path>?
-    ): CompletableFuture<Path> = getMavenArtifact(artifact!!).thenCompose { url: URI ->
+    ): CompletableFuture<Path> = getMavenArtifacts(artifacts).thenCompose { urls: List<URI> ->
         supplyAsyncDecompile {
             outputTo(version) {
                 val classLoader = if (allowSharing) {
-                    classLoaders.computeIfAbsent(url, this::createClassLoader)
+                    classLoaders.computeIfAbsent(urls, this::createClassLoader)
                 } else {
-                    createClassLoader(url)
+                    createClassLoader(urls)
                 }
                 val task = Class.forName(taskClassName, true, classLoader).newInstance()
                 if (task.javaClass.classLoader != classLoader) {
@@ -76,9 +81,9 @@ class JavaDecompiler(name: String, private val taskClassName: String, private va
         }
     }
 
-    private fun createClassLoader(url: URI) = DecompileTaskClassLoader(URLClassLoader(arrayOf(
+    private fun createClassLoader(urls: List<URI>) = DecompileTaskClassLoader(URLClassLoader(arrayOf(
         getBaseUrl(JavaDecompiler::class.java),
-        url.toURL()
+        *urls.map(URI::toURL).toTypedArray()
     )))
 
     override fun toString() = "JavaDecompiler($name)"
@@ -157,3 +162,47 @@ open class FernflowerDecompileTask : DecompileTask {
 }
 
 private fun formatClassPath(cp: List<Path>) = cp.joinToString(File.pathSeparator) { it.toAbsolutePath().toString() }
+
+@Suppress("unused")
+class ProcyonDecompileTask : DecompileTask {
+    override fun decompile(version: String, jar: Path, outputDir: Path, cp: List<Path>?): Path {
+        getJarFileSystem(jar).use {
+            val settings = DecompilerSettings.javaDefaults()
+            settings.isUnicodeOutputEnabled = true
+            settings.typeLoader = ITypeLoader { name, buffer ->
+                val path = it.getPath("$name.class")
+                if (!Files.exists(path)) return@ITypeLoader false
+                val bytes = Files.readAllBytes(path)
+                buffer.putByteArray(bytes, 0, bytes.size)
+                buffer.position(0)
+                true
+            }
+            val errors = TreeMap<String, Throwable>()
+            Files.walk(it.rootDirectories.first())
+                .map(Path::toString)
+                .filter { str -> str.endsWith(".class") && !str.contains('$') }
+                .forEach { p ->
+                    val internalName = p.substring(1, p.length - 6)
+                    println("Decompiling ${internalName.replace('/', '.')})")
+                    val outPath = outputDir.resolve("$internalName.java")
+                    try {
+                        Files.createDirectories(outPath.parent)
+                        Files.newBufferedWriter(outPath).use { outWriter ->
+                            com.strobel.decompiler.Decompiler.decompile(internalName, PlainTextOutput(outWriter), settings)
+                        }
+                    } catch (t: Throwable) {
+                        errors[internalName] = t
+                    }
+                }
+            if (errors.isNotEmpty()) {
+                val sb = StringBuilder()
+                for ((file, error) in errors.entries) {
+                    sb.append(file).append('\n')
+                    sb.append(error.message).append('\n')
+                }
+                Files.write(outputDir.resolve("errors.txt"), sb.toString().toByteArray())
+            }
+        }
+        return outputDir
+    }
+}

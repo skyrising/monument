@@ -278,6 +278,13 @@ fun getMavenArtifact(mvnArtifact: MavenArtifact): CompletableFuture<URI> {
     return download(url, filePath).thenApply { filePath.toUri() }
 }
 
+fun getMavenArtifacts(mvnArtifacts: List<MavenArtifact>): CompletableFuture<List<URI>> {
+    val futures = mvnArtifacts.map(::getMavenArtifact)
+    return CompletableFuture.allOf(*futures.toTypedArray()).thenApply {
+        futures.map(CompletableFuture<URI>::get)
+    }
+}
+
 private object Dummy
 
 fun extractGradle(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync {

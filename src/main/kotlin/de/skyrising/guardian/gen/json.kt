@@ -79,7 +79,7 @@ data class MavenArtifact(val mavenUrl: URI, val artifact: ArtifactSpec) {
     }
     fun getURL(): URI = mavenUrl.resolve(getPath())
 }
-data class DecompilerMap(val map: Map<Decompiler, MavenArtifact>)
+data class DecompilerMap(val map: Map<Decompiler, List<MavenArtifact>>)
 
 val GSON: Gson = GsonBuilder()
     .registerTypeAdapter<JsonObject, GitConfig> { obj, _, context ->
@@ -112,16 +112,19 @@ val GSON: Gson = GsonBuilder()
         SourceConfig(mappings, decompiler, postProcessors)
     }
     .registerTypeAdapter<JsonObject, DecompilerMap> { obj, _, context ->
-        val map = mutableMapOf<Decompiler, MavenArtifact>()
+        val map = mutableMapOf<Decompiler, List<MavenArtifact>>()
         for (key in obj.keySet()) {
             val decompiler = getDecompiler(key)
             val value = obj[key]
-            val artifact = if (value.isJsonObject) {
-                context.deserialize(value)
-            } else {
-                MavenArtifact(MAVEN_CENTRAL, context.deserialize(value))
+            val arr = if (value.isJsonArray) value.asJsonArray.toList() else listOf(value)
+            val artifacts = arr.map {
+                if (it.isJsonObject) {
+                    context.deserialize(it)
+                } else {
+                    MavenArtifact(MAVEN_CENTRAL, context.deserialize(it))
+                }
             }
-            map[decompiler] = artifact
+            map[decompiler] = artifacts
         }
         DecompilerMap(map)
     }
@@ -154,5 +157,6 @@ fun getDecompiler(id: String) = when (id) {
     "forgeflower" -> Decompiler.FORGEFLOWER
     "fabriflower" -> Decompiler.FABRIFLOWER
     "quiltflower" -> Decompiler.QUILTFLOWER
+    "procyon" -> Decompiler.PROCYON
     else -> throw IllegalArgumentException("Unknown decompiler '$id'")
 }

@@ -19,11 +19,15 @@ val MAVEN_CENTRAL = URI("https://repo1.maven.org/maven2/")
 val FORGE_MAVEN = URI("https://maven.minecraftforge.net/")
 val FABRIC_MAVEN = URI("https://maven.fabricmc.net/")
 val QUILT_MAVEN = URI("https://maven.quiltmc.org/repository/release/")
-val DEFAULT_DECOMPILER_MAP = mapOf<Decompiler, MavenArtifact>(
-    Decompiler.CFR to MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.benf", "cfr", "0.151")),
-    Decompiler.FORGEFLOWER to MavenArtifact(FORGE_MAVEN, ArtifactSpec("net.minecraftforge", "forgeflower", "1.5.498.5")),
-    Decompiler.FABRIFLOWER to MavenArtifact(FABRIC_MAVEN, ArtifactSpec("net.fabricmc", "fabric-fernflower", "1.4.0")),
-    Decompiler.QUILTFLOWER to MavenArtifact(QUILT_MAVEN, ArtifactSpec("org.quiltmc", "quiltflower", "1.3.0"))
+val DEFAULT_DECOMPILER_MAP = mapOf<Decompiler, List<MavenArtifact>>(
+    Decompiler.CFR to listOf(MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.benf", "cfr", "0.151"))),
+    Decompiler.FORGEFLOWER to listOf(MavenArtifact(FORGE_MAVEN, ArtifactSpec("net.minecraftforge", "forgeflower", "1.5.498.5"))),
+    Decompiler.FABRIFLOWER to listOf(MavenArtifact(FABRIC_MAVEN, ArtifactSpec("net.fabricmc", "fabric-fernflower", "1.4.0"))),
+    Decompiler.QUILTFLOWER to listOf(MavenArtifact(QUILT_MAVEN, ArtifactSpec("org.quiltmc", "quiltflower", "1.3.0"))),
+    Decompiler.PROCYON to listOf(
+        MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.bitbucket.mstrobel", "procyon-core", "0.5.36")),
+        MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.bitbucket.mstrobel", "procyon-compilertools", "0.5.36"))
+    )
 )
 
 val OUTPUT_DIR: Path = Paths.get(System.getenv("MONUMENT_OUTPUT") ?: "output")
@@ -239,7 +243,7 @@ fun getMappedMergedJar(version: VersionInfo, provider: MappingProvider): Complet
     }
 }
 
-fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, MavenArtifact>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
+fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, List<MavenArtifact>>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
     val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version.id)
     if (Files.exists(out)) rmrf(out)
     Files.createDirectories(out)
@@ -249,7 +253,7 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
     Files.createDirectories(tmpOut)
     Files.write(out.resolve(".monument"), listOf(
         "Monument version: $MONUMENT_VERSION",
-        "Decompiler: " + decompilerMap[decompiler]!!.artifact
+        "Decompiler: " + decompilerMap[decompiler]!!.first().artifact
     ))
     return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
@@ -263,8 +267,8 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
             val jar = jarFuture.get()
             val libs = libsFuture.get()
             output(version.id, "Decompiling with ${decompiler.name}")
-            val artifact = decompilerMap[decompiler]
-            decompiler.decompile(artifact, version.id, jar, tmpOut, libs)
+            val artifacts = decompilerMap[decompiler]!!
+            decompiler.decompile(artifacts, version.id, jar, tmpOut, libs)
         }
     }.thenCompose {
         time(version.id, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
