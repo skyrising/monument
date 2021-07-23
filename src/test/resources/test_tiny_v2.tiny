@@ -1,0 +1,8 @@
+tiny	2	0	official	named
+c	pkg/Class1	a
+	f	I	IntField	a
+	f	F	FloatField	b
+	f	Lpkg/Class2;	Cls2Field	c
+	m	()V	<init>	<init>
+	m	([Lpkg/Class1;I)Lpkg/Class2;	method1	a
+c	pkg/Class2	b

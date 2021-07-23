@@ -1,4 +1,4 @@
-package de.skyrising.guardian.gen
+package de.skyrising.guardian.gen.mappings
 
 import cuchaz.enigma.translation.mapping.EntryMapping
 import cuchaz.enigma.translation.mapping.tree.EntryTree
@@ -7,6 +7,7 @@ import cuchaz.enigma.translation.representation.TypeDescriptor
 import cuchaz.enigma.translation.representation.entry.ClassEntry
 import cuchaz.enigma.translation.representation.entry.FieldEntry
 import cuchaz.enigma.translation.representation.entry.MethodEntry
+import de.skyrising.guardian.gen.*
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes

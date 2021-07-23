@@ -2,6 +2,7 @@ package de.skyrising.guardian.gen
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import de.skyrising.guardian.gen.mappings.MappingTarget
 import java.io.PrintWriter
 import java.net.URI
 import java.nio.charset.StandardCharsets

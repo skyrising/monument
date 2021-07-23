@@ -1,6 +1,10 @@
 package de.skyrising.guardian.gen
 
 import com.google.common.jimfs.Jimfs
+import de.skyrising.guardian.gen.mappings.MappingProvider
+import de.skyrising.guardian.gen.mappings.MappingTarget
+import de.skyrising.guardian.gen.mappings.getMappings
+import de.skyrising.guardian.gen.mappings.mapJar
 import joptsimple.OptionException
 import joptsimple.OptionParser
 import org.tomlj.Toml

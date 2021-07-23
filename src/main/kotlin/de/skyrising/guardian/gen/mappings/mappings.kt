@@ -1,4 +1,4 @@
-package de.skyrising.guardian.gen
+package de.skyrising.guardian.gen.mappings
 
 import com.google.gson.JsonArray
 import cuchaz.enigma.ProgressListener
@@ -6,6 +6,7 @@ import cuchaz.enigma.translation.mapping.EntryMapping
 import cuchaz.enigma.translation.mapping.serde.MappingFormat
 import cuchaz.enigma.translation.mapping.tree.EntryTree
 import cuchaz.enigma.translation.mapping.tree.HashEntryTree
+import de.skyrising.guardian.gen.*
 import java.net.URI
 import java.nio.file.FileSystem
 import java.nio.file.Files
@@ -13,7 +14,6 @@ import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 
 val JARS_MAPPED_DIR: Path = JARS_DIR.resolve("mapped")
-
 
 interface MappingProvider {
     val name: String

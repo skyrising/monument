@@ -2,6 +2,7 @@ package de.skyrising.guardian.gen
 
 import com.google.gson.*
 import com.google.gson.reflect.TypeToken
+import de.skyrising.guardian.gen.mappings.MappingProvider
 import java.io.Reader
 import java.lang.reflect.Type
 import java.net.URI

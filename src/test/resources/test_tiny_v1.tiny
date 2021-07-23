@@ -1,0 +1,8 @@
+v1	official	named
+CLASS	pkg/Class1	a
+CLASS	pkg/Class2	b
+FIELD	pkg/Class1	I	IntField	a
+FIELD	pkg/Class1	F	FloatField	b
+FIELD	pkg/Class1	Lpkg/Class2;	Cls2Field	c
+METHOD	pkg/Class1	()V	<init>	<init>
+METHOD	pkg/Class1	([Lpkg/Class1;I)Lpkg/Class2;	method1	a
