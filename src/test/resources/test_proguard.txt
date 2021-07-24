@@ -4,5 +4,5 @@ pkg.Class1 -> a:
     float FloatField -> b
     pkg.Class2 Cls2Field -> c
     11:14:void <init>() -> <init>
-    16:24:pkg.Class2 method1(pkg.Class1[],int) -> a
+    pkg.Class2 method1(pkg.Class1[],int) -> a
 pkg.Class2 -> b:

@@ -16,11 +16,6 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
     implementation("com.google.code.gson:gson:2.8.6")
-    implementation("cuchaz:enigma:0.23.1") {
-        exclude("net.fabricmc", "cfr")
-        exclude("net.fabricmc", "procyon-fabric-compilertools")
-        exclude("net.fabricmc", "procyon-fabric-core")
-    }
     implementation("net.fabricmc:stitch:0.6.1")
     implementation("org.tomlj:tomlj:1.0.0")
     implementation("org.ow2.asm:asm:9.1")

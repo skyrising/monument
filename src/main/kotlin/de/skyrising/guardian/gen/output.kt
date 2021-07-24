@@ -1,6 +1,5 @@
 package de.skyrising.guardian.gen
 
-import cuchaz.enigma.ProgressListener
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.io.PrintStream
@@ -85,6 +84,11 @@ fun <R> outputTo(key: String, cb: () -> R): R {
 
 fun closeOutput(key: String) {
     outputs.remove(key)
+}
+
+interface ProgressListener {
+    fun init(totalWork: Int, title: String?)
+    fun step(numDone: Int, message: String?)
 }
 
 class VersionedProgressListener(val version: String, initialTitle: String) : ProgressListener {

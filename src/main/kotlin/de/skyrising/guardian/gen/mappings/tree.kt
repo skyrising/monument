@@ -42,6 +42,24 @@ open class MappingTree(val namespaces: Array<String>) {
         else -> type
     }
 
+    fun merge(other: MappingTree): MappingTree {
+        if (!namespaces.contentEquals(other.namespaces)) throw IllegalArgumentException("Incompatible namespaces, cannot merge mappings")
+        val result = MappingTree(namespaces)
+        val allClasses = linkedSetOf<String>()
+        allClasses.addAll(classes.keys)
+        allClasses.addAll(other.classes.keys)
+        for (c in allClasses) {
+            val a = classes[c]
+            val b = other.classes[c]
+            if (a == null || b == null) {
+                result.classes.add(a ?: b!!)
+                continue
+            }
+            result.classes.add(a.merge(b))
+        }
+        return result
+    }
+
     fun toString(format: MappingsFormat): String {
         val writer = StringWriter()
         format.write(this, writer)
@@ -67,6 +85,29 @@ class ClassMapping(private val names: Array<String>) : Mapping<String> {
         for (m in methods) inverted.methods.add(m.invert(size, index, tree))
         for (f in fields) inverted.fields.add(f.invert(size, index, tree))
         return inverted
+    }
+
+    fun merge(other: ClassMapping): ClassMapping {
+        if (!names.contentEquals(other.names)) throw IllegalArgumentException("Cannot merge class mappings for $defaultName: conflicting names")
+        val allMethods = linkedSetOf<MemberDescriptor>()
+        allMethods.addAll(methods.keys)
+        allMethods.addAll(other.methods.keys)
+        val allFields = linkedSetOf<MemberDescriptor>()
+        allFields.addAll(fields.keys)
+        allFields.addAll(other.fields.keys)
+        if (allMethods.size == methods.size && allFields.size == fields.size) return this
+        val result = ClassMapping(names)
+        if (allMethods.size == methods.size) {
+            result.methods.addAll(methods)
+        } else {
+            for (m in allMethods) result.methods.add(methods[m] ?: other.methods[m]!!)
+        }
+        if (allFields.size == fields.size) {
+            result.fields.addAll(fields)
+        } else {
+            for (f in allFields) result.fields.add(fields[f] ?: other.fields[f]!!)
+        }
+        return result
     }
 
     override fun equals(other: Any?) =
@@ -216,6 +257,7 @@ class IndexedMemberList<T, M: Mapping<T>> : AbstractMutableSet<M>() {
 
     operator fun get(key: T) = index[key]
     fun containsKey(key: T) = index.containsKey(key)
+    val keys get() = index.keys
 }
 
 inline operator fun IndexedMemberList<MemberDescriptor, *>.get(name: String, type: String) = get(MemberDescriptor(name, type))

@@ -28,11 +28,13 @@ object ProguardMappings : LineBasedMappingFormat<Pair<MappingTree, ClassMapping?
                 "    ${getTypeName(f.defaultName.type)} ${f[0]} -> ${f[1]}"
             },
             cls.methods.stream().map { m ->
-                val lineFrom = if (m is ProguardMethodMapping) m.lineFrom else 0
-                val lineTo = if (m is ProguardMethodMapping) m.lineTo else 0
-                val type = Type.getMethodType(m.defaultName.type)
                 val sb = StringBuilder("    ")
-                sb.append(lineFrom).append(':').append(lineTo).append(':')
+                if (m is ProguardMethodMapping) {
+                    val lineFrom = m.lineFrom
+                    val lineTo = m.lineTo
+                    sb.append(lineFrom).append(':').append(lineTo).append(':')
+                }
+                val type = Type.getMethodType(m.defaultName.type)
                 sb.append(getTypeName(type.returnType.descriptor)).append(' ')
                 sb.append(m[0]).append('(')
                 var first = true
@@ -59,8 +61,14 @@ object ProguardMappings : LineBasedMappingFormat<Pair<MappingTree, ClassMapping?
         if (currentClass == null) throw IllegalStateException("Cannot parse class member without a class")
         if (!line.startsWith("    ")) throw IllegalArgumentException("Expected line to start with '    '")
         when (line[4]) {
-            in '0' .. '9' -> parseMethod(currentClass, line)
-            in 'a' .. 'z', in 'A' .. 'Z' -> parseField(currentClass, line)
+            in '0' .. '9' -> parseMethodWithLines(currentClass, line)
+            in 'a' .. 'z', in 'A' .. 'Z' -> {
+                if (line.contains('(')) {
+                    parseMethod(currentClass, line)
+                } else {
+                    parseField(currentClass, line)
+                }
+            }
             else -> throw IllegalArgumentException("Expected method or field mapping, got '$line'")
         }
     }
@@ -76,6 +84,19 @@ object ProguardMappings : LineBasedMappingFormat<Pair<MappingTree, ClassMapping?
     }
 
     private fun parseMethod(currentClass: ClassMapping, line: String) {
+        val space = line.indexOf(' ', 4)
+        val openParen = line.indexOf('(', space + 1)
+        val closeParenArrow = line.indexOf(") -> ", openParen + 1)
+        if (space < 0 || openParen < 0 || closeParenArrow < 0) {
+            throw IllegalArgumentException("Invalid method mapping '$line'")
+        }
+        val from = line.substring(space + 1, openParen)
+        val desc = parseMethodDescriptor(line, 4, space, openParen, closeParenArrow)
+        val to = line.substring(closeParenArrow + 5)
+        currentClass.methods.add(MethodMappingImpl(MemberDescriptor(from, desc), arrayOf(from, to)))
+    }
+
+    private fun parseMethodWithLines(currentClass: ClassMapping, line: String) {
         val colon1 = line.indexOf(':', 4)
         val colon2 = line.indexOf(':', colon1 + 1)
         val space = line.indexOf(' ', colon2 + 1)
@@ -87,17 +108,22 @@ object ProguardMappings : LineBasedMappingFormat<Pair<MappingTree, ClassMapping?
         val lineFrom = line.substring(4, colon1).toInt()
         val lineTo = line.substring(colon1 + 1, colon2).toInt()
         val from = line.substring(space + 1, openParen)
+        val desc = parseMethodDescriptor(line, colon2 + 1, space, openParen, closeParenArrow)
+        val to = line.substring(closeParenArrow + 5)
+        currentClass.methods.add(ProguardMethodMapping(lineFrom, lineTo, MemberDescriptor(from, desc), arrayOf(from, to)))
+    }
+
+    private fun parseMethodDescriptor(line: String, start: Int, space: Int, openParen: Int, closeParen: Int): String {
         val desc = StringBuilder("(")
         var i = openParen + 1
-        while (i < closeParenArrow) {
+        while (i < closeParen) {
             var argEnd = line.indexOf(',', i)
-            if (argEnd < 0) argEnd = closeParenArrow
+            if (argEnd < 0) argEnd = closeParen
             desc.append(getTypeDescriptor(line.substring(i, argEnd)))
             i = argEnd + 1
         }
-        desc.append(")").append(getTypeDescriptor(line.substring(colon2 + 1, space)))
-        val to = line.substring(closeParenArrow + 5)
-        currentClass.methods.add(ProguardMethodMapping(lineFrom, lineTo, MemberDescriptor(from, desc.toString()), arrayOf(from, to)))
+        desc.append(")").append(getTypeDescriptor(line.substring(start, space)))
+        return desc.toString()
     }
 
     private fun getTypeDescriptor(type: String): String = when {

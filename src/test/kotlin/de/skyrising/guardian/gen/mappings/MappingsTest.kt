@@ -2,10 +2,7 @@ package de.skyrising.guardian.gen.mappings
 
 import java.io.BufferedReader
 import java.io.StringReader
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
+import kotlin.test.*
 
 class MappingsTest {
     private fun checkCommonTree(tree: MappingTree) {
@@ -56,9 +53,7 @@ class MappingsTest {
         assertEquals(11, initMethod.lineFrom)
         assertEquals(14, initMethod.lineTo)
         val method1 = cls1.methods["method1", "([Lpkg/Class1;I)Lpkg/Class2;"]!!
-        assertTrue(method1 is ProguardMethodMapping)
-        assertEquals(16, method1.lineFrom)
-        assertEquals(24, method1.lineTo)
+        assertFalse(method1 is ProguardMethodMapping)
     }
 
     @Test
@@ -117,9 +112,7 @@ class MappingsTest {
         assertEquals("<init>", initMethod[1])
         val method1 = cls1.methods["a", "([La;I)Lb;"]
         assertNotNull(method1)
-        assertTrue(method1 is ProguardMethodMapping)
-        assertEquals(16, method1.lineFrom)
-        assertEquals(24, method1.lineTo)
+        assertFalse(method1 is ProguardMethodMapping)
         assertEquals("a", method1[0])
         assertEquals("method1", method1[1])
         assertEquals(3, cls1.fields.size)

@@ -17,7 +17,6 @@
 
 package de.skyrising.guardian.gen
 
-import cuchaz.enigma.ProgressListener
 import net.fabricmc.stitch.util.StitchUtil
 import net.fabricmc.stitch.util.StitchUtil.FileSystemDelegate
 import net.fabricmc.stitch.util.SyntheticParameterClassVisitor

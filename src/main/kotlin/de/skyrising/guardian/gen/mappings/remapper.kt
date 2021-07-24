@@ -1,12 +1,5 @@
 package de.skyrising.guardian.gen.mappings
 
-import cuchaz.enigma.translation.mapping.EntryMapping
-import cuchaz.enigma.translation.mapping.tree.EntryTree
-import cuchaz.enigma.translation.representation.MethodDescriptor
-import cuchaz.enigma.translation.representation.TypeDescriptor
-import cuchaz.enigma.translation.representation.entry.ClassEntry
-import cuchaz.enigma.translation.representation.entry.FieldEntry
-import cuchaz.enigma.translation.representation.entry.MethodEntry
 import de.skyrising.guardian.gen.*
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassWriter
@@ -21,57 +14,50 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 
-class AsmRemapper(private val tree: EntryTree<EntryMapping>, private val superClasses: Map<String, Set<String>>) : Remapper() {
+class AsmRemapper(private val tree: MappingTree, private val superClasses: Map<String, Set<String>>, private val namespace: Int = tree.namespaces.size - 1) : Remapper() {
     override fun map(internalName: String?): String? {
         if (internalName == null) return null
-        val mapped = tree.get(ClassEntry(internalName))?.targetName ?: return internalName
-        val dollar = internalName.lastIndexOf('$')
-        if (dollar >= 0) {
-            val outerMapped = map(internalName.substring(0, dollar)) ?: return internalName
-            return "$outerMapped$$mapped"
-        }
-        return mapped
+        return tree.mapType(internalName, namespace)
     }
 
     override fun mapFieldName(owner: String?, name: String?, descriptor: String?): String? {
         if (owner == null || name == null || descriptor == null) return null
-        return mapFieldName0(ClassEntry(owner), name, TypeDescriptor(descriptor)) ?: name
+        return mapFieldName0(tree.classes[owner], MemberDescriptor(name, descriptor)) ?: name
     }
 
-    private fun mapFieldName0(owner: ClassEntry, name: String, descriptor: TypeDescriptor): String? {
-        val mapped = tree.findNode(FieldEntry(owner, name, descriptor))?.value?.targetName
-        if (mapped != null) return mapped
-        val supers = superClasses[owner.fullName] ?: return null
-        for (superClass in supers) {
-            val superMapped = mapFieldName0(ClassEntry(superClass), name, descriptor)
-            if (superMapped != null) return superMapped
-        }
-        return null
-    }
+    private fun mapFieldName0(owner: ClassMapping?, member: MemberDescriptor): String? =
+        mapMember(owner, member, { o, f -> o.fields[f] }, ::mapFieldName0)
 
     override fun mapMethodName(owner: String?, name: String?, descriptor: String?): String? {
         if (owner == null || name == null || descriptor == null) return null
-        return mapMethodName0(ClassEntry(owner), name, MethodDescriptor(descriptor)) ?: name
+        return mapMethodName0(tree.classes[owner], MemberDescriptor(name, descriptor)) ?: name
     }
 
-    private fun mapMethodName0(owner: ClassEntry, name: String, descriptor: MethodDescriptor): String? {
-        val mapped = tree.findNode(MethodEntry(owner, name, descriptor))?.value?.targetName
-        if (mapped != null) return mapped
-        val supers = superClasses[owner.fullName] ?: return null
+    private fun mapMethodName0(owner: ClassMapping?, member: MemberDescriptor): String? =
+        mapMember(owner, member, { o, m -> o.methods[m] }, ::mapMethodName0)
+
+    private inline fun mapMember(owner: ClassMapping?, member: MemberDescriptor,
+                                 getMember: (ClassMapping, MemberDescriptor) -> MemberMapping?,
+                                 recurse: (ClassMapping?, MemberDescriptor) -> String?
+    ): String? {
+        if (owner == null) return null
+        val mapped = getMember(owner, member)
+        if (mapped != null) return mapped.getName(namespace)
+        val supers = superClasses[owner.defaultName] ?: return null
         for (superClass in supers) {
-            val superMapped = mapMethodName0(ClassEntry(superClass), name, descriptor)
+            val superMapped = recurse(tree.classes[superClass], member)
             if (superMapped != null) return superMapped
         }
         return null
     }
 }
 
-fun mapJar(version: String, input: Path, mappings: EntryTree<EntryMapping>, provider: String): CompletableFuture<Path> {
+fun mapJar(version: String, input: Path, mappings: MappingTree, provider: String, namespace: Int = mappings.namespaces.size - 1): CompletableFuture<Path> {
     val output = JARS_MAPPED_DIR.resolve(provider).resolve(JARS_DIR.relativize(input))
-    return mapJar(version, input, output, mappings).thenApply { output }
+    return mapJar(version, input, output, mappings, namespace).thenApply { output }
 }
 
-fun mapJar(version: String, input: Path, output: Path, mappings: EntryTree<EntryMapping>) = supplyAsync {
+fun mapJar(version: String, input: Path, output: Path, mappings: MappingTree, namespace: Int = mappings.namespaces.size - 1) = supplyAsync {
     getJarFileSystem(input).use { inFs ->
         createJarFileSystem(output).use { outFs ->
             val inRoot = inFs.getPath("/")
@@ -102,7 +88,7 @@ fun mapJar(version: String, input: Path, output: Path, mappings: EntryTree<Entry
             Timer(version, "remapJarWrite").use {
                 val classNames = superClasses.keys
                 for (supers in superClasses.values) supers.retainAll(classNames)
-                val remapper = AsmRemapper(mappings, superClasses)
+                val remapper = AsmRemapper(mappings, superClasses, namespace)
                 for ((className, classNode) in classNodes) {
                     val remappedNode = ClassNode()
                     val classRemapper = ClassRemapper(remappedNode, remapper)
@@ -110,7 +96,8 @@ fun mapJar(version: String, input: Path, output: Path, mappings: EntryTree<Entry
                     fixBridgeMethods(remappedNode)
                     val classWriter = ClassWriter(0)
                     remappedNode.accept(classWriter)
-                    val outPath = outRoot.resolve("${remapper.map(className)}.class")
+                    val remappedName = remapper.map(className) ?: throw IllegalArgumentException("$className could not be remapped")
+                    val outPath = outRoot.resolve("$remappedName.class")
                     Files.createDirectories(outPath.parent)
                     Files.write(outPath, classWriter.toByteArray())
                 }
