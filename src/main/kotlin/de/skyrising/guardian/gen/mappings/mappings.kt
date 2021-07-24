@@ -56,7 +56,7 @@ abstract class CommonMappingProvider(override val name: String, override val for
         }.thenApplyAsync {
             if (!Files.exists(mappingsFile)) return@thenApplyAsync null
             val tree = Files.newBufferedReader(mappingsFile).use(format::parse)
-            if (invert != null) tree.invert(invert) else tree
+            if (invert != null) Timer(version.id, "mappings.invert.${target.id}").use { tree.invert(invert) } else tree
         }
     }
 
@@ -100,10 +100,12 @@ fun getMappings(provider: MappingProvider, version: VersionInfo, target: Mapping
         if (it != null || target != MappingTarget.MERGED) return@thenCompose CompletableFuture.completedFuture(it)
         val client = provider.getLatestMappings(version, MappingTarget.CLIENT, cache)
         val server = provider.getLatestMappings(version, MappingTarget.SERVER, cache)
-        CompletableFuture.allOf(client, server).thenApply {
-            val c = client.get() ?: return@thenApply null
-            val s = server.get() ?: return@thenApply null
-            c.merge(s)
+        Timer(version.id, "mappings.merge").use {
+            CompletableFuture.allOf(client, server).thenApply {
+                val c = client.get() ?: return@thenApply null
+                val s = server.get() ?: return@thenApply null
+                c.merge(s)
+            }
         }
     }
 }

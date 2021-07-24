@@ -4,6 +4,11 @@ plugins {
     application
 }
 
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
 repositories {
     mavenCentral()
     maven("https://maven.fabricmc.net/") { name = "FabricMC" }
@@ -35,6 +40,6 @@ application {
 
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java).all {
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "11"
     }
 }

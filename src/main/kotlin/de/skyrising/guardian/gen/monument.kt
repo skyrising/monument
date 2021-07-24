@@ -5,6 +5,10 @@ import de.skyrising.guardian.gen.mappings.MappingProvider
 import de.skyrising.guardian.gen.mappings.MappingTarget
 import de.skyrising.guardian.gen.mappings.getMappings
 import de.skyrising.guardian.gen.mappings.mapJar
+import jdk.jfr.Configuration
+import jdk.jfr.FlightRecorder
+import jdk.jfr.Recording
+import jdk.jfr.RecordingState
 import joptsimple.OptionException
 import joptsimple.OptionParser
 import org.tomlj.Toml
@@ -14,6 +18,7 @@ import java.nio.file.FileSystem
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.stream.Collectors
@@ -36,15 +41,27 @@ val DEFAULT_DECOMPILER_MAP = mapOf<Decompiler, List<MavenArtifact>>(
     )
 )
 
-val OUTPUT_DIR: Path = Paths.get(System.getenv("MONUMENT_OUTPUT") ?: "output")
+val OUTPUT_DIR: Path = Path.of(System.getenv("MONUMENT_OUTPUT") ?: "output")
 val REPO_DIR: Path = OUTPUT_DIR.resolve("guardian.git")
 val TEMP_REPO_DIR: Path = OUTPUT_DIR.resolve("guardian-temp")
 val SOURCES_DIR: Path = OUTPUT_DIR.resolve("sources")
 
-val CACHE_DIR: Path = Paths.get(System.getenv("MONUMENT_CACHE") ?: ".cache")
+val CACHE_DIR: Path = Path.of(System.getenv("MONUMENT_CACHE") ?: ".cache")
 val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
 fun main(args: Array<String>) {
+    FlightRecorder.register(TimerEvent::class.java)
+    if (FlightRecorder.isAvailable() && !FlightRecorder.getFlightRecorder().recordings.stream().map(Recording::getState).anyMatch { it == RecordingState.NEW || it == RecordingState.RUNNING }) {
+        val confPath = Path.of(Context::class.java.getResource("/flightrecorder-config.jfc")!!.toURI())
+        val conf = Configuration.create(confPath)
+        val dateString = SimpleDateFormat("yyyy-MM-dd-hh-mm-ss").format(Date())
+        val recording = Recording(conf)
+        recording.dumpOnExit = true
+        recording.isToDisk = true
+        recording.name = "monument-$dateString"
+        recording.destination = Path.of("logs", "monument-$dateString.jfr")
+        recording.start()
+    }
     val parser = OptionParser()
     val helpArg = parser.accepts("help").forHelp()
     val nonOptionsArg = parser.nonOptions()

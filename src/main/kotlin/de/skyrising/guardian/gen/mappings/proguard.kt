@@ -1,6 +1,6 @@
 package de.skyrising.guardian.gen.mappings
 
-import jdk.internal.org.objectweb.asm.Type
+import org.objectweb.asm.Type
 import java.util.stream.Stream
 
 object ProguardMappings : LineBasedMappingFormat<Pair<MappingTree, ClassMapping?>>() {

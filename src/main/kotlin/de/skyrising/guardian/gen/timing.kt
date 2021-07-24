@@ -1,5 +1,9 @@
 package de.skyrising.guardian.gen
 
+import jdk.jfr.Category
+import jdk.jfr.Event
+import jdk.jfr.Label
+import jdk.jfr.Name
 import java.io.PrintStream
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -17,12 +21,26 @@ fun <T> time(version: String, id: String, future: CompletableFuture<T>): Complet
 class Timer(val version: String, val id: String) : AutoCloseable {
     var start = System.nanoTime()
     var end = 0L
+    private val event = TimerEvent(version, id)
+
+    init {
+        if (event.isEnabled) event.begin()
+    }
 
     override fun close() {
+        if (event.shouldCommit()) event.commit()
         end = System.nanoTime()
         timers.add(this)
     }
 }
+
+@Name("monument.Timer")
+@Label("Timer")
+@Category("Monument")
+data class TimerEvent(
+    @Label("Minecraft Version") val version: String,
+    @Label("Task") val id: String
+) : Event()
 
 fun dumpTimers(out: PrintStream) {
     var earliestStart = Long.MAX_VALUE
