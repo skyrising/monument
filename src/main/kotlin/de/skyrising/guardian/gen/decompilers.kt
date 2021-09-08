@@ -134,8 +134,12 @@ interface DecompileTask {
 @Suppress("unused")
 open class FernflowerDecompileTask : DecompileTask {
     protected fun getArgs(jar: Path, outputDir: Path, cp: List<Path>?, defaults: Map<String, Any>): Array<String> {
-        val args = mutableListOf("-ind=    ")
-        //if (defaults.containsKey("iec")) args.add("-iec=1")
+        val args = mutableListOf("-${IFernflowerPreferences.INDENT_STRING}=    ")
+        // QuiltFlower has fast iec
+        if (IFernflowerPreferences.WARN_INCONSISTENT_INNER_CLASSES in defaults) {
+            args.add("-${IFernflowerPreferences.INCLUDE_ENTIRE_CLASSPATH}=1")
+        }
+        args.add("-${IFernflowerPreferences.DECOMPILE_GENERIC_SIGNATURES}=1")
         val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
         executor.decompileParallelism = 4
         if (cp != null) {
