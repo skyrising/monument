@@ -139,6 +139,7 @@ open class FernflowerDecompileTask : DecompileTask {
         if (IFernflowerPreferences.WARN_INCONSISTENT_INNER_CLASSES in defaults) {
             args.add("-${IFernflowerPreferences.INCLUDE_ENTIRE_CLASSPATH}=1")
         }
+        args.add("-${IFernflowerPreferences.REMOVE_SYNTHETIC}=1")
         args.add("-${IFernflowerPreferences.DECOMPILE_GENERIC_SIGNATURES}=1")
         val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
         executor.decompileParallelism = 4
