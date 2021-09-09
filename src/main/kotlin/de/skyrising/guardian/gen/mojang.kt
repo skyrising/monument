@@ -133,7 +133,6 @@ fun generateGradleBuild(version: VersionInfo, dir: Path): CompletableFuture<Unit
         val libs = manifest["libraries"]!!.asJsonArray
         val byCondition = mutableMapOf<String, MutableSet<Dependency>>()
         byCondition[""] = mutableSetOf(
-            Dependency("net.fabricmc:fabric-loader:+", "compileOnly"),
             Dependency("com.google.code.findbugs:jsr305:3.0.1", "compileOnly")
         )
         for (lib in libs) {
@@ -155,10 +154,6 @@ fun generateGradleBuild(version: VersionInfo, dir: Path): CompletableFuture<Unit
         out.println("    maven {")
         out.println("        name = 'Minecraft Libraries'")
         out.println("        url = 'https://libraries.minecraft.net/'")
-        out.println("    }")
-        out.println("    maven {")
-        out.println("        name = 'Fabric' // For sided annotations")
-        out.println("        url = 'https://maven.fabricmc.net/'")
         out.println("    }")
         out.println("    mavenCentral()")
         out.println("}")

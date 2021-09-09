@@ -288,9 +288,10 @@ fun getMavenArtifacts(mvnArtifacts: List<MavenArtifact>): CompletableFuture<List
 
 private object Dummy
 
-fun extractGradle(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync {
+fun extractGradleAndExtraSources(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync {
     useResourceFileSystem(Dummy::class.java) {
         copy(it.resolve("gradle_env"), out, StandardCopyOption.REPLACE_EXISTING)
+        copy(it.resolve("extra_src"), out.resolve("src/main/java"), StandardCopyOption.REPLACE_EXISTING)
     }
 }.thenCompose {
     generateGradleBuild(version, out)

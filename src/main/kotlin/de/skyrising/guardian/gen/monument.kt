@@ -307,7 +307,7 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
     }.thenCompose {
         time(version.id, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
     }.thenCompose {
-        extractGradle(version, out)
+        extractGradleAndExtraSources(version, out)
     }.thenApply {
         tmpOutFs?.close()
         tmpOutPath?.apply(::rmrf)
