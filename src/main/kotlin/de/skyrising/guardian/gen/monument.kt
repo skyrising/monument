@@ -1,10 +1,7 @@
 package de.skyrising.guardian.gen
 
 import com.google.common.jimfs.Jimfs
-import de.skyrising.guardian.gen.mappings.MappingProvider
-import de.skyrising.guardian.gen.mappings.MappingTarget
-import de.skyrising.guardian.gen.mappings.getMappings
-import de.skyrising.guardian.gen.mappings.mapJar
+import de.skyrising.guardian.gen.mappings.*
 import jdk.jfr.Configuration
 import jdk.jfr.FlightRecorder
 import jdk.jfr.Recording
@@ -258,6 +255,8 @@ fun spellVersions(count: Int) = if (count == 1) "$count version" else "$count ve
 fun getSourcePath(version: String, mappings: MappingProvider, decompiler: Decompiler): Path = SOURCES_DIR.resolve(mappings.name).resolve(decompiler.name).resolve(version)
 
 fun getMappedMergedJar(version: VersionInfo, provider: MappingProvider): CompletableFuture<Path> {
+    val mappedJarPath = getMappedJarOutput(provider.name, JARS_MERGED_DIR.resolve("${version.id}.jar"))
+    if (Files.exists(mappedJarPath)) return CompletableFuture.completedFuture(mappedJarPath)
     val jar = getJar(version, MappingTarget.MERGED)
     val mappings = getMappings(provider, version, MappingTarget.MERGED)
     return CompletableFuture.allOf(jar, mappings).thenCompose {
@@ -314,7 +313,7 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
         tmpOutPath?.apply(::rmrf)
         closeOutput(version.id)
         out
-    }
+    }.exceptionally { throw RuntimeException("Error generating sources for ${version.id}", it) }
 }
 
 val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context.default }

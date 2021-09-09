@@ -52,8 +52,10 @@ class AsmRemapper(private val tree: MappingTree, private val superClasses: Map<S
     }
 }
 
+fun getMappedJarOutput(provider: String, input: Path): Path = JARS_MAPPED_DIR.resolve(provider).resolve(JARS_DIR.relativize(input))
+
 fun mapJar(version: String, input: Path, mappings: MappingTree, provider: String, namespace: Int = mappings.namespaces.size - 1): CompletableFuture<Path> {
-    val output = JARS_MAPPED_DIR.resolve(provider).resolve(JARS_DIR.relativize(input))
+    val output = getMappedJarOutput(provider, input)
     return mapJar(version, input, output, mappings, namespace).thenApply { output }
 }
 
