@@ -189,6 +189,14 @@ fun generateGradleBuild(version: VersionInfo, dir: Path): CompletableFuture<Unit
             }
         }
         out.println("}")
+        out.println()
+        out.println("tasks.withType(JavaCompile) {")
+        out.println("    options.encoding = \"UTF-8\"")
+        if (javaVersion > 8) {
+            out.print("    it.options.release = ")
+            out.println(javaVersion)
+        }
+        out.println("}")
     }
     PrintWriter(Files.newBufferedWriter(dir.resolve("settings.gradle"), StandardCharsets.UTF_8)).use { out ->
         out.println("rootProject.name = 'minecraft'")
