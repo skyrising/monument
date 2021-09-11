@@ -8,6 +8,7 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributes
+import java.security.MessageDigest
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
@@ -78,6 +79,41 @@ fun copy(path: Path, to: Path, vararg options: CopyOption) {
         }
     })
 }
+
+fun copyCached(path: Path, to: Path, cacheDir: Path) {
+    Files.walkFileTree(path, object : SimpleFileVisitor<Path>() {
+        override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes?): FileVisitResult {
+            val dest = to.resolve(path.relativize(dir).toString())
+            Files.createDirectories(dest)
+            return FileVisitResult.CONTINUE
+        }
+
+        override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+            val content = Files.readAllBytes(file)
+            val dest = to.resolve(path.relativize(file).toString())
+            writeCached(dest, content, cacheDir)
+            return FileVisitResult.CONTINUE
+        }
+    })
+}
+
+fun writeCached(path: Path, content: ByteArray, cacheDir: Path) {
+    val hash = hex(sha256(content))
+    val fileName = path.getName(path.nameCount - 1).toString()
+    val extension = fileName.substringAfter('.', "")
+    val suffix = if (extension.isNotEmpty()) ".$extension" else ""
+    val cachePath = cacheDir.resolve(hash.substring(0, 2)).resolve(hash.substring(2) + suffix)
+    if (!Files.exists(cachePath)) {
+        Files.createDirectories(cachePath.parent)
+        Files.write(cachePath, content)
+    }
+    Files.deleteIfExists(path)
+    Files.createLink(path, cachePath)
+}
+
+private fun sha256(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes)
+private fun hex(bytes: ByteArray) =
+    bytes.joinToString("") { ((it.toInt() shr 4) and 0xf).toString(16) + (it.toInt() and 0xf).toString(16) }
 
 fun getJarFileSystem(jar: Path): FileSystem {
     val uri = jar.toUri()
@@ -212,9 +248,9 @@ fun extractResources(jar: Path, out: Path, postProcessors: List<PostProcessor>) 
             val fileOut = out.resolve(outRelative.toString())
             Files.createDirectories(fileOut.parent)
             if (content == null) {
-                Files.copy(path, fileOut, StandardCopyOption.REPLACE_EXISTING)
+                copyCached(path, fileOut, RESOURCE_CACHE_DIR)
             } else {
-                Files.write(fileOut, content)
+                writeCached(fileOut, content, RESOURCE_CACHE_DIR)
             }
         }
     }
@@ -290,8 +326,8 @@ private object Dummy
 
 fun extractGradleAndExtraSources(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync {
     useResourceFileSystem(Dummy::class.java) {
-        copy(it.resolve("gradle_env"), out, StandardCopyOption.REPLACE_EXISTING)
-        copy(it.resolve("extra_src"), out.resolve("src/main/java"), StandardCopyOption.REPLACE_EXISTING)
+        copyCached(it.resolve("gradle_env"), out, RESOURCE_CACHE_DIR)
+        copyCached(it.resolve("extra_src"), out.resolve("src/main/java"), RESOURCE_CACHE_DIR)
     }
 }.thenCompose {
     generateGradleBuild(version, out)

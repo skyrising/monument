@@ -44,6 +44,7 @@ val TEMP_REPO_DIR: Path = OUTPUT_DIR.resolve("guardian-temp")
 val SOURCES_DIR: Path = OUTPUT_DIR.resolve("sources")
 
 val CACHE_DIR: Path = Path.of(System.getenv("MONUMENT_CACHE") ?: ".cache")
+val RESOURCE_CACHE_DIR: Path = CACHE_DIR.resolve("resources")
 val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
 fun main(args: Array<String>) {
