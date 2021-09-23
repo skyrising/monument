@@ -24,6 +24,10 @@ private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) ->
     if (Files.exists(file)) return@supplyAsync
     println("Downloading $url")
     Files.createDirectories(file.parent)
+    if (url.scheme == "file") {
+        Files.copy(Paths.get(url), file)
+        return@supplyAsync
+    }
     val conn = url.toURL().openConnection() as HttpURLConnection
     conn.connect()
     val len = conn.getHeaderFieldLong("Content-Length", -1)
