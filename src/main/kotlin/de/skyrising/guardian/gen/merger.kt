@@ -18,11 +18,9 @@
 package de.skyrising.guardian.gen
 
 import net.fabricmc.stitch.util.StitchUtil
-import net.fabricmc.stitch.util.StitchUtil.FileSystemDelegate
 import net.fabricmc.stitch.util.SyntheticParameterClassVisitor
 import org.objectweb.asm.*
 import org.objectweb.asm.tree.*
-import java.io.File
 import java.io.IOException
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributeView
@@ -35,7 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 fun mergeJars(version: String, client: Path, server: Path, merged: Path) = supplyAsync {
     Files.createDirectories(merged.parent)
-    JarMerger(client.toFile(), server.toFile(), merged.toFile()).use { merger ->
+    JarMerger(client, server, merged).use { merger ->
         merger.enableSnowmanRemoval()
         merger.enableRecordFixer()
         merger.setProgressListener(VersionedProgressListener(version, "Merging jars..."))
@@ -43,14 +41,14 @@ fun mergeJars(version: String, client: Path, server: Path, merged: Path) = suppl
     }
 }
 
-class JarMerger(inputClient: File?, inputServer: File?, output: File) :
+class JarMerger(inputClient: Path, inputServer: Path, output: Path) :
     AutoCloseable {
     inner class Entry(val path: Path, val metadata: BasicFileAttributes, val data: ByteArray?)
 
     private var progressListener: ProgressListener? = null
-    private var inputClientFs: FileSystemDelegate? = null
-    private var inputServerFs: FileSystemDelegate? = null
-    private val outputFs: FileSystemDelegate
+    private var inputClientFs: FileSystem? = null
+    private var inputServerFs: FileSystem? = null
+    private val outputFs: FileSystem
     private val inputClient: Path
     private val inputServer: Path
     private lateinit var entriesClient: Map<String, Entry?>
@@ -144,7 +142,7 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
                 val entry = entriesOut[e] ?: continue
                 val ePath = entry.path.toString()
                 listener?.step(writeCounter++, ePath.substring(1))
-                val outPath = outputFs.get().getPath(ePath)
+                val outPath = outputFs.getPath(ePath)
                 if (outPath.parent != null) {
                     Files.createDirectories(outPath.parent)
                 }
@@ -221,12 +219,12 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
     }
 
     init {
-        if (output.exists() && !output.delete()) throw IOException("Could not delete " + output.name)
-        this.inputClientFs = StitchUtil.getJarFileSystem(inputClient, false)
-        this.inputClient = inputClientFs!!.get().getPath("/")
-        this.inputServerFs = StitchUtil.getJarFileSystem(inputServer, false)
-        this.inputServer = inputServerFs!!.get().getPath("/")
-        outputFs = StitchUtil.getJarFileSystem(output, true)
+        Files.deleteIfExists(output)
+        this.inputClientFs = getJarFileSystem(inputClient)
+        this.inputClient = inputClientFs!!.getPath("/")
+        this.inputServerFs = getJarFileSystem(inputServer)
+        this.inputServer = inputServerFs!!.getPath("/")
+        outputFs = createJarFileSystem(output)
         entriesAll = TreeSet()
     }
 }
