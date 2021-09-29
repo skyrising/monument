@@ -37,6 +37,7 @@ fun mergeJars(version: String, client: Path, server: Path, merged: Path) = suppl
     Files.createDirectories(merged.parent)
     JarMerger(client.toFile(), server.toFile(), merged.toFile()).use { merger ->
         merger.enableSnowmanRemoval()
+        merger.enableRecordFixer()
         merger.setProgressListener(VersionedProgressListener(version, "Merging jars..."))
         merger.merge()
     }
@@ -57,12 +58,18 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
     private val entriesAll: MutableSet<String>
     private var removeSnowmen = false
     private var offsetSyntheticsParams = false
+    private var fixRecords = false;
+
     fun enableSnowmanRemoval() {
         removeSnowmen = true
     }
 
     fun enableSyntheticParamsOffset() {
         offsetSyntheticsParams = true
+    }
+
+    fun enableRecordFixer() {
+        fixRecords = true
     }
 
     fun setProgressListener(listener: ProgressListener) {
@@ -194,7 +201,14 @@ class JarMerger(inputClient: File?, inputServer: File?, output: File) :
             if (removeSnowmen) visitor = SnowmanClassVisitor(StitchUtil.ASM_VERSION, visitor)
             if (offsetSyntheticsParams) visitor = SyntheticParameterClassVisitor(StitchUtil.ASM_VERSION, visitor)
             if (visitor !== writer) {
-                reader.accept(visitor, 0)
+                if (fixRecords) {
+                    val node = ClassNode()
+                    reader.accept(node, 0)
+                    fixRecords(node)
+                    node.accept(visitor)
+                } else {
+                    reader.accept(visitor, 0)
+                }
                 data = writer.toByteArray()
                 result = Entry(result.path, result.metadata, data)
             }
@@ -454,4 +468,18 @@ class SnowmanClassVisitor(api: Int, cv: ClassVisitor?) : ClassVisitor(api, cv) {
     }
 }
 
-fun isSnowman(name: String) = name.startsWith("\u2603") || name == "\u00e2\u02dc\u0192"
+fun fixRecords(node: ClassNode) {
+    if (node.superName != "java/lang/Record") return
+    val components = mutableListOf<RecordComponentNode>()
+    if (node.recordComponents != null) {
+        components.addAll(node.recordComponents)
+    }
+    for (f in node.fields) {
+        if ((f.access and (Opcodes.ACC_STATIC or Opcodes.ACC_FINAL)) != Opcodes.ACC_FINAL) continue
+        val component = RecordComponentNode(StitchUtil.ASM_VERSION, f.name, f.desc, f.signature)
+        components.add(component)
+    }
+    node.recordComponents = components
+}
+
+fun isSnowman(name: String) = name.startsWith("\u2603") || name == "\u00e2\u02dc\u0192" || name.startsWith("$$")

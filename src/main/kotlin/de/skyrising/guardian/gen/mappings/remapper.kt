@@ -1,10 +1,7 @@
 package de.skyrising.guardian.gen.mappings
 
 import de.skyrising.guardian.gen.*
-import org.objectweb.asm.ClassReader
-import org.objectweb.asm.ClassWriter
-import org.objectweb.asm.Opcodes
-import org.objectweb.asm.Type
+import org.objectweb.asm.*
 import org.objectweb.asm.commons.ClassRemapper
 import org.objectweb.asm.commons.Remapper
 import org.objectweb.asm.tree.ClassNode
@@ -18,6 +15,10 @@ class AsmRemapper(private val tree: MappingTree, private val superClasses: Map<S
     override fun map(internalName: String?): String? {
         if (internalName == null) return null
         return tree.mapType(internalName, namespace)
+    }
+
+    override fun mapRecordComponentName(owner: String?, name: String?, descriptor: String?): String? {
+        return mapFieldName(owner, name, descriptor)
     }
 
     override fun mapFieldName(owner: String?, name: String?, descriptor: String?): String? {
@@ -49,6 +50,27 @@ class AsmRemapper(private val tree: MappingTree, private val superClasses: Map<S
             if (superMapped != null) return superMapped
         }
         return null
+    }
+
+    override fun mapValue(value: Any?): Any? {
+        if (value is Handle) {
+            return Handle(
+                value.tag,
+                mapType(value.owner),
+                if (value.tag <= Opcodes.H_PUTSTATIC) {
+                    mapFieldName(value.owner, value.name, value.desc)
+                } else {
+                    mapMethodName(value.owner, value.name, value.desc)
+                },
+                if (value.tag <= Opcodes.H_PUTSTATIC) {
+                    mapDesc(value.desc)
+                } else {
+                    mapMethodDesc(value.desc)
+                },
+                value.isInterface
+            )
+        }
+        return super.mapValue(value)
     }
 }
 
@@ -93,12 +115,22 @@ fun mapJar(version: String, input: Path, output: Path, mappings: MappingTree, na
                 val remapper = AsmRemapper(mappings, superClasses, namespace)
                 for ((className, classNode) in classNodes) {
                     val remappedNode = ClassNode()
-                    val classRemapper = ClassRemapper(remappedNode, remapper)
+                    val classRemapper = object : ClassRemapper(remappedNode, remapper) {
+
+
+                    }
                     classNode.accept(classRemapper)
                     fixBridgeMethods(remappedNode)
+                    val remappedName = remapper.map(className) ?: throw IllegalArgumentException("$className could not be remapped")
+                    if (remappedNode.sourceFile == null) {
+                        var end = remappedName.indexOf('$')
+                        if (end < 0) end = remappedName.length
+                        val start = remappedName.lastIndexOf('/', end) + 1
+                        val name = remappedName.substring(start, end)
+                        remappedNode.sourceFile = "$name.java"
+                    }
                     val classWriter = ClassWriter(0)
                     remappedNode.accept(classWriter)
-                    val remappedName = remapper.map(className) ?: throw IllegalArgumentException("$className could not be remapped")
                     val outPath = outRoot.resolve("$remappedName.class")
                     Files.createDirectories(outPath.parent)
                     Files.write(outPath, classWriter.toByteArray())
