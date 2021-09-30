@@ -28,7 +28,7 @@ interface MappingProvider {
         val MOJANG = object : CommonMappingProvider("mojang", ProguardMappings, "txt", "official") {
             override fun getUrl(cache: Path, version: VersionInfo, mappings: String?, target: MappingTarget): CompletableFuture<URI?> =
                 if (target == MappingTarget.MERGED) CompletableFuture.completedFuture(null)
-                else getVersionManifest(version).thenApply { manifest ->
+                else getMojangVersionManifest(version).thenApply { manifest ->
                     manifest["downloads"]?.asJsonObject?.get(target.id + "_mappings")?.asJsonObject?.get("url")?.asString?.let { URI(it) }
                 }
         }

@@ -18,7 +18,6 @@ import java.nio.file.Paths
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.CompletableFuture
-import java.util.stream.Collectors
 import kotlin.system.exitProcess
 
 val MONUMENT_VERSION = getMonumentVersion()
@@ -106,7 +105,11 @@ fun main(args: Array<String>) {
         printUsage()
         return
     }
-    update(branch, action, recommitFrom, manifest)
+    try {
+        update(branch, action, recommitFrom, manifest)
+    } finally {
+        threadLocalContext.get().executor.shutdownNow()
+    }
 }
 
 fun readConfig(): Config {
@@ -170,33 +173,34 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     val versions = if (manifest != null) {
         parseVersionManifest(GSON.fromJson(Files.newBufferedReader(manifest)))
     } else {
-        mcVersions.join()
+        getMcVersions().join()
     }
+    val newest = linkVersions(versions)
     fun getVersion(id: String?): VersionInfo? {
         if (id == null) return null
         return versions[id] ?: throw IllegalArgumentException("Unknown version '${id}'")
     }
     val base = getVersion(branchConfig.base)
-    val head = getVersion(branchConfig.head)
-    val branchVersions = versions.filterValues {
-        when {
-            base != null && it < base -> false
-            head != null && it > head -> false
-            else -> branchConfig.filter(it)
-        }
+    val head = (if (branchConfig.head == null) newest else getVersion(branchConfig.head))
+        ?: throw IllegalStateException("No head version found")
+    println("Finding path from ${base ?: "the beginning"} to $head")
+    val branchVersions = findPredecessors(head, base) {
+        branchConfig.filter(it) && (
+            immediate { mappings.supportsVersion(it, MappingTarget.MERGED) }
+            || immediate { mappings.supportsVersion(it, MappingTarget.CLIENT) }
+            || immediate { mappings.supportsVersion(it, MappingTarget.SERVER) }
+        )
     }
-    println("Filtering version list (${spellVersions(branchVersions.size)})")
-    val supported = branchVersions.values.parallelStream().filter {
-        immediate { mappings.supportsVersion(it, MappingTarget.MERGED) }
-        || immediate { mappings.supportsVersion(it, MappingTarget.CLIENT) }
-        || immediate { mappings.supportsVersion(it, MappingTarget.SERVER) }
-    }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
-    println("${spellVersions(supported.size)} supported by '${mappings.name}' mappings")
-    val missing = supported.parallelStream().filter {
+    if (branchVersions.isEmpty()) {
+        System.err.println("No path found")
+        return
+    }
+    println("Found a graph containing ${spellVersions(branchVersions.size)}: $branchVersions")
+    val missing = branchVersions.filter {
         val srcPath = getSourcePath(it.id, mappings, decompiler)
         Files.notExists(srcPath) || Files.notExists(srcPath.resolve("src/main/java")) || Files.exists(srcPath.resolve("src/main/java-tmp"))
-    }.collect(Collectors.toCollection { Collections.synchronizedSortedSet(TreeSet<VersionInfo>()) })
-    println("Source code for ${spellVersions(missing.size)} missing")
+    }
+    println("Source code for ${spellVersions(missing.size)} missing: $missing")
 
     if (check) exitProcess(if (missing.isEmpty()) 1 else 0)
 
@@ -242,8 +246,9 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
         println("All sources generated")
     }
     println("Creating branch '$branch'")
-    val history = mutableListOf<CommitTemplate>()
-    for (version in supported) history.add(CommitTemplate(version, getSourcePath(version.id, mappings, decompiler)))
+    val history = createCommits(branchVersions) { version, parents ->
+        CommitTemplate(version, getSourcePath(version.id, mappings, decompiler), parents)
+    }
     createBranch(branch, config.git, history, recommitFrom ?: missing.firstOrNull()?.id)
     val time = (System.currentTimeMillis() - startTime) / 1000.0
     threadLocalContext.get().executor.shutdownNow()

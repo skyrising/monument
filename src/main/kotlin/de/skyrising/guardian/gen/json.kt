@@ -112,6 +112,17 @@ val GSON: Gson = GsonBuilder()
         if (processSources) postProcessors.add(SOURCE_PROCESSOR)
         SourceConfig(mappings, decompiler, postProcessors)
     }
+    .registerTypeAdapter<JsonObject, VersionInfo> { obj, _, context ->
+        var id: String = obj.require("id", context)
+        if (obj.has("omniId")) id = obj.require("omniId", context)
+        VersionInfo(
+            id,
+            obj.require("type", context),
+            obj.require("url", context),
+            obj.require("time", context),
+            obj.require("releaseTime", context)
+        )
+    }
     .registerTypeAdapter<JsonObject, DecompilerMap> { obj, _, context ->
         val map = mutableMapOf<Decompiler, List<MavenArtifact>>()
         for (key in obj.keySet()) {

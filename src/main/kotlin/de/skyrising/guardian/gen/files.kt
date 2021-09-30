@@ -28,21 +28,25 @@ private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) ->
         Files.copy(Paths.get(url), file)
         return@supplyAsync
     }
-    val conn = url.toURL().openConnection() as HttpURLConnection
-    conn.connect()
-    val len = conn.getHeaderFieldLong("Content-Length", -1)
-    BufferedInputStream(conn.inputStream).use { input ->
-        Files.newOutputStream(file).use { output ->
-            val buf = ByteArray(4096)
-            var progress = 0L
-            while (true) {
-                val read = input.read(buf)
-                if (read == -1) break
-                output.write(buf, 0, read)
-                progress += read
-                if (listener != null) listener(DownloadProgress(len, progress))
+    try {
+        val conn = url.toURL().openConnection() as HttpURLConnection
+        conn.connect()
+        val len = conn.getHeaderFieldLong("Content-Length", -1)
+        BufferedInputStream(conn.inputStream).use { input ->
+            Files.newOutputStream(file).use { output ->
+                val buf = ByteArray(4096)
+                var progress = 0L
+                while (true) {
+                    val read = input.read(buf)
+                    if (read == -1) break
+                    output.write(buf, 0, read)
+                    progress += read
+                    if (listener != null) listener(DownloadProgress(len, progress))
+                }
             }
         }
+    } catch (e: IOException) {
+        throw IOException("Failed to download $url", e)
     }
 }
 
