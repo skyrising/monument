@@ -4,26 +4,15 @@ author = { name = 'Mojang', email = '...' }
 committer = { name = 'Mojang', email = '...' }
 
 # Specify custom versions of decompilers
-#[decompilers]
-#cfr = 'org.benf:cfr:0.151'
+[decompilers]
+cfr = 'org.benf:cfr:0.151'
+quiltflower = { url = "https://jitpack.io/", artifact = "com.github.QuiltMC:quiltflower:develop~1.6.0-SNAPSHOT"}
 
 # Define a source set
-[sources.'mojang/cfr']
+[sources.'mojang/quiltflower']
 mappings = 'mojang'
-decompiler = 'cfr'
+decompiler = 'quiltflower'
 
-# Define a branch based on the mojang/cfr, excluding the infinity snapshot
-[branches.master]
-source = 'mojang/cfr'
-filter.exclude = ['20w14infinite']
-
-# Define a branch based on the mojang/cfr, ending with the infinity snapshot
-[branches.20w14infinite]
-source = 'mojang/cfr'
-head = '20w14infinite'
-
-# Define a branch based on the mojang/cfr, starting from 20w15a and ending with 20w16a, this will have 2 commits
-[branches.test]
-source = 'mojang/cfr'
-base = '20w15a'
-head = '20w16a'
+# Define a branch based on the mojang/quiltflower
+[branches.main]
+source = 'mojang/quiltflower'
