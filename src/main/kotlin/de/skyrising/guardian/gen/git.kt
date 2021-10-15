@@ -158,7 +158,8 @@ fun gitCommitTree(dir: Path, tree: String, date: ZonedDateTime, config: GitConfi
 
 fun getMonumentVersion(): String {
     return try {
-        val path = getMonumentClassRoot() ?: Paths.get(".")
+        var path = getMonumentClassRoot() ?: Paths.get(".")
+        if (!Files.isDirectory(path)) path = path.parent
         val (code, p) = run(path, null, listOf("git", "describe", "--always", "--tags", "--dirty")).join()
         if (code != 0) return "unknown"
         p.inputStream.bufferedReader().readText().trim()

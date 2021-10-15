@@ -49,8 +49,7 @@ val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 fun main(args: Array<String>) {
     FlightRecorder.register(TimerEvent::class.java)
     if (FlightRecorder.isAvailable() && !FlightRecorder.getFlightRecorder().recordings.stream().map(Recording::getState).anyMatch { it == RecordingState.NEW || it == RecordingState.RUNNING }) {
-        val confPath = Path.of(Context::class.java.getResource("/flightrecorder-config.jfc")!!.toURI())
-        val conf = Configuration.create(confPath)
+        val conf = Configuration.create(Context::class.java.getResourceAsStream("/flightrecorder-config.jfc")!!.reader())
         val dateString = SimpleDateFormat("yyyy-MM-dd-hh-mm-ss").format(Date())
         val recording = Recording(conf)
         recording.dumpOnExit = true

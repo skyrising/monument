@@ -124,6 +124,9 @@ class DecompileTaskClassLoader(parent: ClassLoader) : ClassLoader(parent) {
 private fun getBaseUrl(cls: Class<*>): URL {
     val path = "/" + cls.name.replace('.', '/') + ".class"
     val url = cls.getResource(path)?.toExternalForm() ?: throw FileNotFoundException("Can't find $path")
+    if (url.startsWith("jar:")) {
+        return URL(url.substring(4, url.indexOf("!/")))
+    }
     return URL(url.substring(0, url.lastIndexOf(path)))
 }
 

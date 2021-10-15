@@ -1,12 +1,13 @@
 plugins {
-    id("org.jetbrains.kotlin.jvm") version "1.3.70"
+    kotlin("jvm") version "1.5.31"
     id("com.github.johnrengelman.shadow") version "5.2.0"
     application
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(11))
+    }
 }
 
 repositories {

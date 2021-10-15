@@ -15,11 +15,6 @@ val JARS_MERGED_DIR: Path = JARS_DIR.resolve("merged")
 val MOJANG_CACHE_DIR: Path = CACHE_DIR.resolve("mojang")
 val LIBS_CACHE_DIR: Path = MOJANG_CACHE_DIR.resolve("libraries")
 
-val mcGameVersionManifest: CompletableFuture<JsonObject> by lazy { requestJson<JsonObject>(URI("https://launchermeta.mojang.com/mc/game/version_manifest.json")) }
-val mcVersions: CompletableFuture<Map<String, VersionInfo>> by lazy { getMojangVersions() }
-
-private fun getMojangVersions(): CompletableFuture<Map<String, VersionInfo>> = mcGameVersionManifest.thenApply(::parseVersionManifest)
-
 private fun cachedFile(url: URI): Path? {
     if (url.host != "launchermeta.mojang.com" || !url.path.startsWith("/v1/packages/")) return null
     val path = url.path.substring("/v1/packages/".length)

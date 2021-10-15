@@ -307,8 +307,12 @@ fun useResourceFileSystem(cls: Class<*>, fn: (Path) -> Unit) {
     when (uri.scheme) {
         "file" -> fn(Paths.get(uri).parent)
         "jar" -> {
-            FileSystems.newFileSystem(uri, emptyMap<String, Any>()).use {
-                fn(it.getPath("/"))
+            try {
+                FileSystems.newFileSystem(uri, emptyMap<String, Any>()).use {
+                    fn(it.getPath("/"))
+                }
+            } catch (e: FileSystemAlreadyExistsException) {
+                fn(FileSystems.getFileSystem(uri).getPath("/"))
             }
         }
         else -> throw IllegalStateException("Cannot get file system for scheme '${uri.scheme}'")
