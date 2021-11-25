@@ -75,8 +75,10 @@ data class MavenArtifact(val mavenUrl: URI, val artifact: ArtifactSpec) {
         val artifact = artifact
         val id = artifact.id
         val version = artifact.version
+        val versionA = version.substringBefore('/')
+        val versionB = version.substringAfter('/')
         val classifier = artifact.classifier?.let { "-$it" } ?: ""
-        return "${artifact.group.replace('.', '/')}/$id/$version/$id-$version$classifier.jar"
+        return "${artifact.group.replace('.', '/')}/$id/$versionA/$id-$versionB$classifier.jar"
     }
     fun getURL(): URI = mavenUrl.resolve(getPath())
 }
