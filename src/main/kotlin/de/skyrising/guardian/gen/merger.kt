@@ -20,6 +20,8 @@ package de.skyrising.guardian.gen
 import net.fabricmc.stitch.util.StitchUtil
 import net.fabricmc.stitch.util.SyntheticParameterClassVisitor
 import org.objectweb.asm.*
+import org.objectweb.asm.signature.SignatureReader
+import org.objectweb.asm.signature.SignatureVisitor
 import org.objectweb.asm.tree.*
 import java.io.IOException
 import java.nio.file.*
@@ -468,14 +470,41 @@ class SnowmanClassVisitor(api: Int, cv: ClassVisitor?) : ClassVisitor(api, cv) {
 
 fun fixRecords(node: ClassNode) {
     if (node.superName != "java/lang/Record") return
-    val components = mutableListOf<RecordComponentNode>()
     if (node.recordComponents != null) {
-        components.addAll(node.recordComponents)
+        val components = node.recordComponents.associateBy { it.name }
+        for (f in node.fields) {
+            if (components[f.name]?.descriptor == f.desc) {
+                f.access = f.access or Opcodes.ACC_PRIVATE
+            }
+        }
+        return
     }
+    val components = mutableListOf<RecordComponentNode>()
+    val typeVars = linkedSetOf<String>()
     for (f in node.fields) {
         if ((f.access and (Opcodes.ACC_STATIC or Opcodes.ACC_FINAL)) != Opcodes.ACC_FINAL) continue
+        f.access = f.access or Opcodes.ACC_PRIVATE
         val component = RecordComponentNode(StitchUtil.ASM_VERSION, f.name, f.desc, f.signature)
         components.add(component)
+        val sig = f.signature
+        if (sig != null) {
+            SignatureReader(sig).accept(object : SignatureVisitor(Opcodes.ASM9) {
+                override fun visitTypeVariable(name: String) {
+                    typeVars.add(name)
+                }
+            })
+        }
+    }
+    if (node.signature == null && typeVars.isNotEmpty()) {
+        val sb = StringBuilder("<")
+        for (typeVar in typeVars) {
+            sb.append(typeVar).append(":Ljava/lang/Object;")
+        }
+        sb.append(">L").append(node.superName).append(';')
+        for (ifn in node.interfaces) {
+            sb.append('L').append(ifn).append(';')
+        }
+        node.signature = sb.toString()
     }
     node.recordComponents = components
 }
