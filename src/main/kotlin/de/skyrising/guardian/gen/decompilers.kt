@@ -144,6 +144,9 @@ open class FernflowerDecompileTask : DecompileTask {
         }
         args.add("-${IFernflowerPreferences.REMOVE_SYNTHETIC}=1")
         args.add("-${IFernflowerPreferences.DECOMPILE_GENERIC_SIGNATURES}=1")
+        if ("pam" in defaults) {
+            args.add("-pam=1")
+        }
         val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
         executor.decompileParallelism = 4
         if (cp != null) {
