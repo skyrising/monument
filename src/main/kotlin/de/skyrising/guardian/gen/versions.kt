@@ -173,9 +173,10 @@ fun getRealJar(version: VersionInfo, jar: Path, target: MappingTarget): Path {
         fs.close()
         return jar
     }
-    for (file in Files.readAllLines(versionListFile)) {
+    val files = Files.readAllLines(versionListFile)
+    for (file in files) {
         val parts = file.split('\t')
-        if (parts[1] == version.id) {
+        if (parts[1] == version.id || files.size == 1) {
             val archivedPath = fs.getPath("META-INF/versions", parts[2])
             Files.copy(archivedPath, realPath)
             return realPath
