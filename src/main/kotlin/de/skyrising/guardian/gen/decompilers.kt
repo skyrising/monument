@@ -161,7 +161,7 @@ open class FernflowerDecompileTask : DecompileTask {
             args.add("-pam=1")
         }
         val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
-        executor.decompileParallelism = 4
+        executor.decompileParallelism = minOf(4, MAX_THREADS)
         if (cp != null) {
             for (p in cp) args.add("-e=${p.toAbsolutePath()}")
         }
@@ -195,7 +195,7 @@ class ProcyonDecompileTask : DecompileTask {
         val outDir = outputDir(true)
         val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
         executor.decompileParallelism = minOf(
-            Runtime.getRuntime().availableProcessors() - 2,
+            MAX_THREADS,
             (Runtime.getRuntime().maxMemory() / (768 * 1024 * 1024)).toInt()
         )
         Timer(version, "decompile").use {

@@ -46,6 +46,9 @@ val CACHE_DIR: Path = Path.of(System.getenv("MONUMENT_CACHE") ?: ".cache")
 val RESOURCE_CACHE_DIR: Path = CACHE_DIR.resolve("resources")
 val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
+val INITIAL_MAX_THREADS = maxOf(Runtime.getRuntime().availableProcessors() - 2, 1)
+var MAX_THREADS = INITIAL_MAX_THREADS
+
 fun main(args: Array<String>) {
     FlightRecorder.register(TimerEvent::class.java)
     Files.createDirectories(Paths.get("logs"))
@@ -65,6 +68,7 @@ fun main(args: Array<String>) {
     val nonOptionsArg = parser.nonOptions()
     val recommitArg = parser.acceptsAll(listOf("r", "recommit"), "Recommit more of the history than necessary").withOptionalArg().ofType(String::class.java)
     val manifestArg = parser.acceptsAll(listOf("m", "manifest"), "Specify a custom version manifest file").withOptionalArg().ofType(String::class.java)
+    val threadsArg = parser.acceptsAll(listOf("t", "threads"), "Maximum number of threads to use").withRequiredArg().ofType(Int::class.java)
     fun printUsage() {
         System.err.println("Usage: monument [options] [branch] [action]")
         parser.printHelpOn(System.err)
@@ -82,6 +86,14 @@ fun main(args: Array<String>) {
         if (options.has(recommitArg)) {
             recommitFrom = ":base"
             recommitArg.valueOptional(options).ifPresent { recommitFrom = it }
+        }
+        if (options.has(threadsArg)) {
+            val maxThreads = threadsArg.value(options)
+            if (maxThreads >= 1) {
+                MAX_THREADS = maxThreads
+                val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
+                executor.decompileParallelism = minOf(executor.decompileParallelism, MAX_THREADS)
+            }
         }
         manifestArg.valueOptional(options).ifPresent { manifest = Paths.get(it) }
         val nonOptions = nonOptionsArg.values(options)
@@ -331,6 +343,6 @@ val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context
 
 data class Context(val executor: CustomExecutorService) {
     companion object {
-        val default = Context(CustomThreadPoolExecutor(Runtime.getRuntime().availableProcessors() - 2))
+        val default = Context(CustomThreadPoolExecutor(minOf(INITIAL_MAX_THREADS, MAX_THREADS + 4)))
     }
 }

@@ -72,7 +72,7 @@ fun <K, V> deduplicate(map: MutableMap<K, CompletableFuture<V>>, key: K, future:
 }
 
 class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism: Int, threadFactory: ThreadFactory) : AbstractExecutorService(), CustomExecutorService {
-    constructor(parallelism: Int) : this(parallelism, parallelism, Executors.defaultThreadFactory())
+    constructor(parallelism: Int) : this(parallelism, maxOf(parallelism - 2, 1), Executors.defaultThreadFactory())
 
     companion object {
         val DEBUG = System.getProperty("monument.scheduler.debug") != null
