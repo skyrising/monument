@@ -206,9 +206,15 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     if (check) exitProcess(if (missing.isEmpty()) 1 else 0)
 
     if (missing.isNotEmpty()) {
-        val futures = mutableListOf<CompletableFuture<Path>>()
+        val futures = mutableListOf<CompletableFuture<Void>>()
         enableOutput()
-        for (version in missing) futures.add(genSources(version, mappings, decompiler, decompilerMap, postProcessors))
+        val total = missing.size
+        var done = 0
+        output("progress", "0/$total (0%)")
+        for (version in missing) futures.add(genSources(version, mappings, decompiler, decompilerMap, postProcessors).thenRun {
+            done++
+            output("progress", "$done/$total (${done * 100 / total}%)")
+        })
         val all = CompletableFuture.allOf(*futures.toTypedArray())
         sysOut.println("Waiting for sources to generate")
         var lines = 0

@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 val outputs = ConcurrentHashMap<String, String>()
 private val outputStreams = ConcurrentHashMap<String, PrintStream>()
-val persistentOutputs = listOf("sysout", "syserr")
+val persistentOutputs = listOf("sysout", "syserr", "progress")
 val outputsByThread = linkedMapOf<Thread, String>()
 private var outputEnabled = false
 val sysOut = System.out
