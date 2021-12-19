@@ -130,6 +130,7 @@ fun getJarFileSystem(jar: Path): FileSystem {
 }
 
 fun createJarFileSystem(jar: Path): FileSystem {
+    Files.createDirectories(jar.parent)
     val uri = jar.toUri()
     val fsUri = URI("jar:${uri.scheme}", uri.userInfo, uri.host, uri.port, uri.path, uri.query, uri.fragment)
     return FileSystems.newFileSystem(fsUri, mapOf<String, Any>("create" to "true"))

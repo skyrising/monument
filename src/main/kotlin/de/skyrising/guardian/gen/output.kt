@@ -3,8 +3,6 @@ package de.skyrising.guardian.gen
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.io.PrintStream
-import java.nio.file.Files
-import java.nio.file.Paths
 import java.util.concurrent.ConcurrentHashMap
 
 val outputs = ConcurrentHashMap<String, String>()
@@ -63,7 +61,6 @@ fun output(key: String, line: String) {
 }
 
 fun getOutputPrintStream(key: String) = outputStreams.computeIfAbsent(key) {
-    Files.createDirectories(Paths.get("logs"))
     PrintStream(FileOutputStream("logs/$key.log"))
 }
 

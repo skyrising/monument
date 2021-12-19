@@ -48,6 +48,8 @@ val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
 fun main(args: Array<String>) {
     FlightRecorder.register(TimerEvent::class.java)
+    Files.createDirectories(Paths.get("logs"))
+    Files.createDirectories(CACHE_DIR)
     if (FlightRecorder.isAvailable() && !FlightRecorder.getFlightRecorder().recordings.stream().map(Recording::getState).anyMatch { it == RecordingState.NEW || it == RecordingState.RUNNING }) {
         val conf = Configuration.create(Context::class.java.getResourceAsStream("/flightrecorder-config.jfc")!!.reader())
         val dateString = SimpleDateFormat("yyyy-MM-dd-hh-mm-ss").format(Date())
@@ -210,7 +212,7 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
         enableOutput()
         for (version in missing) futures.add(genSources(version, mappings, decompiler, decompilerMap, postProcessors))
         val all = CompletableFuture.allOf(*futures.toTypedArray())
-            sysOut.println("Waiting for sources to generate")
+        sysOut.println("Waiting for sources to generate")
         var lines = 0
         while (!all.isDone) {
             val listedOutputs = linkedSetOf<String>()
