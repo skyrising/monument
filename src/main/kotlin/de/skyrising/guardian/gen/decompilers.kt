@@ -81,6 +81,8 @@ class JavaDecompiler(name: String, private val taskClassName: String, private va
                     classLoaders.computeIfAbsent(urls, this::createClassLoader)
                 } else {
                     println("Creating a new class loader because a decompiler issue prevents it from being reused")
+                    val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
+                    executor.decompileParallelism = minOf(executor.decompileParallelism, 4)
                     createClassLoader(urls)
                 }
                 val task = Class.forName(taskClassName, true, classLoader).newInstance()
