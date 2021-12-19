@@ -27,7 +27,7 @@ val FORGE_MAVEN = URI("https://maven.minecraftforge.net/")
 val FABRIC_MAVEN = URI("https://maven.fabricmc.net/")
 val QUILT_MAVEN = URI("https://maven.quiltmc.org/repository/release/")
 val DEFAULT_DECOMPILER_MAP = mapOf<Decompiler, List<MavenArtifact>>(
-    Decompiler.CFR to listOf(MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.benf", "cfr", "0.151"))),
+    Decompiler.CFR to listOf(MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.benf", "cfr", "0.152"))),
     Decompiler.FORGEFLOWER to listOf(MavenArtifact(FORGE_MAVEN, ArtifactSpec("net.minecraftforge", "forgeflower", "1.5.498.5"))),
     Decompiler.FABRIFLOWER to listOf(MavenArtifact(FABRIC_MAVEN, ArtifactSpec("net.fabricmc", "fabric-fernflower", "1.4.0"))),
     Decompiler.QUILTFLOWER to listOf(MavenArtifact(QUILT_MAVEN, ArtifactSpec("org.quiltmc", "quiltflower", "1.5.0"))),

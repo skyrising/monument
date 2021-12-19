@@ -23,7 +23,17 @@ interface Decompiler {
     fun decompile(artifacts: List<MavenArtifact>, version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>? = null): CompletableFuture<Path>
 
     companion object {
-        val CFR = JavaDecompiler("cfr", "de.skyrising.guardian.gen.CfrDecompileTask", false /* Workaround for https://github.com/leibnitz27/cfr/issues/250 */)
+        val CFR = JavaDecompiler("cfr", "de.skyrising.guardian.gen.CfrDecompileTask") {
+            for ((_, artifact) in it) {
+                if (artifact.id != "cfr") continue
+                val version = artifact.version.split('.')
+                // Workaround for https://github.com/leibnitz27/cfr/issues/250 below 0.152
+                if (version.size == 2 && version[0] == "0" && version[1].toInt() < 152) {
+                    return@JavaDecompiler false
+                }
+            }
+            true
+        }
         val FERNFLOWER = JavaDecompiler("fernflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
         val FORGEFLOWER = JavaDecompiler("forgeflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
         val FABRIFLOWER = JavaDecompiler("fabriflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
@@ -55,7 +65,7 @@ abstract class CommonDecompiler(override val name: String) : Decompiler {
     override fun toString() = "CommonDecompiler($name)"
 }
 
-class JavaDecompiler(name: String, private val taskClassName: String, private val allowSharing: Boolean = true) : CommonDecompiler(name) {
+class JavaDecompiler(name: String, private val taskClassName: String, private val allowSharing: (List<MavenArtifact>) -> Boolean = { true }) : CommonDecompiler(name) {
     private val classLoaders = ConcurrentHashMap<List<URI>, ClassLoader>()
 
     override fun decompile(
@@ -67,7 +77,7 @@ class JavaDecompiler(name: String, private val taskClassName: String, private va
     ): CompletableFuture<Path> = getMavenArtifacts(artifacts).thenCompose { urls: List<URI> ->
         supplyAsyncDecompile {
             outputTo(version) {
-                val classLoader = if (allowSharing) {
+                val classLoader = if (allowSharing(artifacts)) {
                     classLoaders.computeIfAbsent(urls, this::createClassLoader)
                 } else {
                     createClassLoader(urls)
