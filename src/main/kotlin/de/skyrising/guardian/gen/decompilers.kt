@@ -80,6 +80,7 @@ class JavaDecompiler(name: String, private val taskClassName: String, private va
                 val classLoader = if (allowSharing(artifacts)) {
                     classLoaders.computeIfAbsent(urls, this::createClassLoader)
                 } else {
+                    println("Creating a new class loader because a decompiler issue prevents it from being reused")
                     createClassLoader(urls)
                 }
                 val task = Class.forName(taskClassName, true, classLoader).newInstance()

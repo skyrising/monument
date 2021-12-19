@@ -206,8 +206,6 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     if (check) exitProcess(if (missing.isEmpty()) 1 else 0)
 
     if (missing.isNotEmpty()) {
-        val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
-        executor.decompileParallelism = 1
         val futures = mutableListOf<CompletableFuture<Path>>()
         enableOutput()
         for (version in missing) futures.add(genSources(version, mappings, decompiler, decompilerMap, postProcessors))

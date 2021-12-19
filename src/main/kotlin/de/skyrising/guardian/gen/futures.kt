@@ -84,6 +84,7 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
             val diff = value - decompileParallelism
             if (diff > 0) decompileSemaphore.release(diff)
             else if (diff < 0) decompileSemaphore.acquireUninterruptibly(-diff)
+            println("Decompile parallelism is now $value")
             field = value
         }
     private val decompileSemaphore = Semaphore(decompileParallelism)
