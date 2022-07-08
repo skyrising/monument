@@ -31,7 +31,7 @@ dependencies {
     implementation("com.google.jimfs:jimfs:1.2")
 
     compileOnly("org.bitbucket.mstrobel:procyon-compilertools:0.5.36")
-    compileOnly("org.quiltmc:quiltflower:1.5.0")
+    compileOnly("org.quiltmc:quiltflower:1.8.0")
     compileOnly("org.benf:cfr:0.151")
 }
 
