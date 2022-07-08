@@ -121,7 +121,7 @@ val GSON: Gson = GsonBuilder()
             id,
             obj.require("type", context),
             obj.require("url", context),
-            obj.require("time", context),
+            obj["time", context] ?: obj.require("releaseTime", context),
             obj.require("releaseTime", context)
         )
     }
