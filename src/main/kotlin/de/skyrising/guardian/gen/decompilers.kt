@@ -151,8 +151,10 @@ interface DecompileTask {
 open class FernflowerDecompileTask : DecompileTask {
     protected fun getArgs(jar: Path, outputDir: Path, cp: List<Path>?, defaults: Map<String, Any>): Array<String> {
         val args = mutableListOf("-${IFernflowerPreferences.INDENT_STRING}=    ")
-        // QuiltFlower has fast iec
-        if (IFernflowerPreferences.WARN_INCONSISTENT_INNER_CLASSES in defaults) {
+        if ("jrt" in defaults) {
+            args.add("-jrt=1")
+        } else if (IFernflowerPreferences.WARN_INCONSISTENT_INNER_CLASSES in defaults) {
+            // QuiltFlower has fast iec
             args.add("-${IFernflowerPreferences.INCLUDE_ENTIRE_CLASSPATH}=1")
         }
         args.add("-${IFernflowerPreferences.REMOVE_SYNTHETIC}=1")
