@@ -106,6 +106,7 @@ fun downloadLibraries(manifest: JsonObject): CompletableFuture<List<Path>> {
     val futures = mutableListOf<CompletableFuture<Path>>()
     for (lib in libs) {
         val obj = lib.asJsonObject
+        if (!obj.has("downloads") || !obj["downloads"]!!.asJsonObject.has("artifact")) continue
         val rules = obj["rules"]?.asJsonArray
         if (rules != null) {
             var enabled = true
