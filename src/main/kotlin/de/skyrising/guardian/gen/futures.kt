@@ -75,7 +75,7 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
     constructor(parallelism: Int) : this(parallelism, maxOf(parallelism - 2, 1), Executors.defaultThreadFactory())
 
     companion object {
-        val DEBUG = System.getProperty("monument.scheduler.debug") != null
+        val DEBUG = System.getProperty("monument.scheduler.debug").toBoolean()
     }
 
     var decompileParallelism = initialDecompileParallelism
