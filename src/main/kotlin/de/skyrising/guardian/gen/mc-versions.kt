@@ -14,7 +14,9 @@ fun getMcVersions(): CompletableFuture<Map<String, VersionInfo>> =
     if (Files.notExists(MC_VERSIONS_CACHE_DIR)) {
         git(CACHE_DIR, "clone", MC_VERSIONS_GITHUB, CACHE_DIR.relativize(MC_VERSIONS_CACHE_DIR).toString())
     } else {
-        git(MC_VERSIONS_CACHE_DIR, "pull")
+        git(MC_VERSIONS_CACHE_DIR, "fetch").thenCompose {
+            git(MC_VERSIONS_CACHE_DIR, "reset", "--hard", "origin/main")
+        }
     }.thenApply {
         parseMcVersions()
     }
