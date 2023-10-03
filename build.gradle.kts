@@ -29,6 +29,7 @@ dependencies {
     implementation("org.ow2.asm:asm-commons:9.1")
     implementation("net.sf.jopt-simple:jopt-simple:6.0-alpha-3")
     implementation("com.google.jimfs:jimfs:1.2")
+    implementation("org.jline:jline-terminal:3.21.0")
 
     compileOnly("org.bitbucket.mstrobel:procyon-compilertools:0.5.36")
     compileOnly("org.quiltmc:quiltflower:1.8.0")

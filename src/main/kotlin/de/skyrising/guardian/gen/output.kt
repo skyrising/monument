@@ -3,6 +3,8 @@ package de.skyrising.guardian.gen
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.io.PrintStream
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
 val outputs = ConcurrentHashMap<String, String>()
@@ -13,10 +15,11 @@ private var outputEnabled = false
 val sysOut = System.out
 private val sysErr = System.err
 private val outputToKey = ThreadLocal<String?>()
+private val outputListener = ThreadLocal<((String) -> Unit)?>()
 
 fun enableOutput() {
     outputEnabled = true
-    Thread.currentThread().setUncaughtExceptionHandler { t, e ->
+    Thread.currentThread().setUncaughtExceptionHandler { _, e ->
         disableOutput()
         e.printStackTrace()
     }
@@ -25,8 +28,10 @@ fun enableOutput() {
         override fun write(b: Int) {
             val k = outputToKey.get() ?: Thread.currentThread().name
             getOutputPrintStream(k).write(b)
-            if (b == '\n'.toInt()) {
-                outputs[k] = line.toString()
+            if (b == '\n'.code) {
+                val str = line.toString()
+                outputListener.get()?.invoke(str)
+                outputs[k] = str
                 line.clear()
             } else {
                 line.append(b.toChar())
@@ -37,7 +42,7 @@ fun enableOutput() {
             val k = outputToKey.get() ?: key
             getOutputPrintStream(k).flush()
         }
-    })
+    }, false, StandardCharsets.UTF_8)
     System.setOut(outStream("sysout"))
     System.setErr(outStream("syserr"))
 }
@@ -79,6 +84,15 @@ fun <R> outputTo(key: String, cb: () -> R): R {
     }
 }
 
+fun <R> listen(listener: (String) -> Unit, cb: () -> R): R {
+    outputListener.set(listener)
+    try {
+        return cb()
+    } finally {
+        outputListener.set(null)
+    }
+}
+
 fun closeOutput(key: String) {
     outputs.remove(key)
 }
@@ -101,6 +115,27 @@ class VersionedProgressListener(val version: String, initialTitle: String) : Pro
             totalWork > 0 -> output(version, String.format("%s: %.1f%%", title, 100.0 * numDone / totalWork))
             message != null -> output(version, "$title: $message")
             else -> output(version, "$title: $numDone")
+        }
+    }
+}
+
+data class ProgressUnit(var tasks: Int, var done: Int = 0) {
+    val totalTasks: Int get() = maxOf(tasks, done) + subUnits.sumOf { it.totalTasks }
+    val totalDone: Int get() = done + subUnits.sumOf { it.totalDone }
+
+    val subUnits = mutableListOf<ProgressUnit>()
+
+    fun subUnit(tasks: Int, done: Int = 0): ProgressUnit {
+        val u = ProgressUnit(tasks, done)
+        subUnits.add(u)
+        return u
+    }
+
+    operator fun <T> invoke(future: CompletableFuture<T>): CompletableFuture<T> {
+        tasks++
+        return future.thenApply {
+            done++
+            it
         }
     }
 }

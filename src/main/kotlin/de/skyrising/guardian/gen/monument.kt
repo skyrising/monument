@@ -8,16 +8,16 @@ import jdk.jfr.Recording
 import jdk.jfr.RecordingState
 import joptsimple.OptionException
 import joptsimple.OptionParser
+import org.jline.terminal.TerminalBuilder
 import org.tomlj.Toml
 import java.io.IOException
 import java.net.URI
-import java.nio.file.FileSystem
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
+import java.nio.file.*
+import java.nio.file.attribute.BasicFileAttributes
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.system.exitProcess
 
 val MONUMENT_VERSION = getMonumentVersion()
@@ -48,6 +48,12 @@ val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
 val INITIAL_MAX_THREADS = maxOf(Runtime.getRuntime().availableProcessors() - 2, 1)
 var MAX_THREADS = INITIAL_MAX_THREADS
+
+private val UNICODE_PROGRESS_BLOCKS = charArrayOf(' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█')
+
+val TERMINAL = TerminalBuilder.terminal()
+
+val OPENED_LIBRARIES = ConcurrentHashMap<Path, FileSystem>()
 
 fun main(args: Array<String>) {
     FlightRecorder.register(TimerEvent::class.java)
@@ -220,18 +226,19 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     if (missing.isNotEmpty()) {
         val futures = mutableListOf<CompletableFuture<Void>>()
         enableOutput()
-        val total = missing.size
-        var done = 0
-        output("progress", "0/$total (0%)")
-        for (version in missing) futures.add(genSources(version, mappings, decompiler, decompilerMap, postProcessors).thenRun {
-            done++
-            output("progress", "$done/$total (${done * 100 / total}%)")
-        })
+        val progressUnits = mutableListOf<ProgressUnit>()
+        for (version in missing) {
+            val unit = ProgressUnit(2, 0)
+            progressUnits.add(unit)
+            futures.add(genSources(unit, version, mappings, decompiler, decompilerMap, postProcessors).thenRun {
+                unit.done = unit.tasks
+            })
+        }
         val all = CompletableFuture.allOf(*futures.toTypedArray())
         sysOut.println("Waiting for sources to generate")
         var lines = 0
-        while (!all.isDone) {
-            val listedOutputs = linkedSetOf<String>()
+        fun printStatus(full: Boolean) {
+            val listedOutputs = sortedSetOf<String>()
             for (key in persistentOutputs) {
                 val line = outputs[key]
                 if (line != null) listedOutputs.add("$key: $line")
@@ -243,14 +250,53 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
                     if (line != null) listedOutputs.add("$key: $line")
                 }
             }
-            if (lines > 0) sysOut.print("\u001b[${lines}A\u001b[J")
-            lines = 0
-            for (line in listedOutputs) {
-                lines++
-                sysOut.println(line)
+            val totalUnits = progressUnits.size
+            var doneUnits = 0
+            var totalTasks = 0
+            var doneTasks = 0
+            for (unit in progressUnits) {
+                val unitTasks = unit.totalTasks
+                val unitDone = unit.totalDone
+                if (unitDone == unitTasks) doneUnits++
+                totalTasks += unitTasks
+                doneTasks += unit.totalDone
             }
+            val fraction = if (totalTasks == 0) 0.0 else doneTasks.toDouble() / totalTasks
+            val terminalWidth = TERMINAL.width
+            val progress = StringBuilder("Progress: ")
+            progress.append(doneUnits).append('/').append(totalUnits).append(", ")
+            progress.append(doneTasks).append('/').append(totalTasks).append(" tasks ")
+            if (totalTasks > missing.size * 4) {
+                val progressBarWidth = terminalWidth - progress.length - 10
+                progress.append("\u001b[100m")
+                val barProgress = fraction * progressBarWidth
+                val completeBarUnits = barProgress.toInt()
+                val partialUnit = ((barProgress - completeBarUnits) * 8).toInt()
+                repeat(completeBarUnits) { progress.append(UNICODE_PROGRESS_BLOCKS[8]) }
+                if (completeBarUnits < progressBarWidth) {
+                    progress.append(UNICODE_PROGRESS_BLOCKS[partialUnit])
+                    repeat(progressBarWidth - completeBarUnits - 1) { progress.append(' ') }
+                }
+                progress.append("\u001b[m")
+                progress.append(String.format(" %6.2f%%", fraction * 100))
+            }
+            val output = StringBuilder()
+            if (lines > 0) output.append("\u001b[${lines}A\u001b[J")
+            output.append(progress)
+            lines = 1
+            if (full) {
+                for (line in listedOutputs) {
+                    lines++
+                    output.append('\n').append(line.substring(0, minOf(line.length, terminalWidth)))
+                }
+            }
+            sysOut.println(output)
+        }
+        while (!all.isDone) {
+            printStatus(true)
             if (!all.isDone) Thread.sleep(100)
         }
+        printStatus(false)
         disableOutput()
         if (all.isCompletedExceptionally) {
             try {
@@ -260,6 +306,10 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
                 exitProcess(1)
             }
         }
+        for (lib in OPENED_LIBRARIES.values) {
+            lib.close()
+        }
+        OPENED_LIBRARIES.clear()
         println("All sources generated")
     }
     println("Creating branch '$branch'")
@@ -288,8 +338,9 @@ fun getMappedMergedJar(version: VersionInfo, provider: MappingProvider): Complet
     }
 }
 
-fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, List<MavenArtifact>>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
+fun genSources(unit: ProgressUnit, version: VersionInfo, provider: MappingProvider, decompiler: Decompiler, decompilerMap: Map<Decompiler, List<MavenArtifact>>, postProcessors: List<PostProcessor>): CompletableFuture<Path> {
     val out = SOURCES_DIR.resolve(provider.name).resolve(decompiler.name).resolve(version.id)
+    unit.done++
     if (Files.exists(out)) rmrf(out)
     Files.createDirectories(out)
     val resOut = out.resolve("src/main/resources")
@@ -300,14 +351,14 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
         "Monument version: $MONUMENT_VERSION",
         "Decompiler: " + decompilerMap[decompiler]!!.first().artifact
     ))
-    return getJar(version, MappingTarget.CLIENT).thenCompose { jar ->
+    return unit(getJar(version, MappingTarget.CLIENT)).thenCompose { jar ->
         if (Files.exists(resOut)) rmrf(resOut)
-        time(version.id, "extractResources", extractResources(jar, resOut, postProcessors))
+        unit(time(version.id, "extractResources", extractResources(jar, resOut, postProcessors)))
     }.thenCompose {
         val metaInf = resOut.resolve("META-INF")
         if (Files.exists(metaInf)) rmrf(metaInf)
-        val jarFuture = getMappedMergedJar(version, provider)
-        val libsFuture = downloadLibraries(version)
+        val jarFuture = unit(getMappedMergedJar(version, provider))
+        val libsFuture = unit(downloadLibraries(version))
         CompletableFuture.allOf(jarFuture, libsFuture).thenCompose {
             val jar = jarFuture.get()
             val libs = libsFuture.get()
@@ -325,16 +376,39 @@ fun genSources(version: VersionInfo, provider: MappingProvider, decompiler: Deco
                     tmpOut
                 }
             }
-            decompiler.decompile(artifacts, version.id, jar, outputDir, libs)
+            val classes = HashSet<String>(4096)
+            getJarFileSystem(jar).use { fs ->
+                Files.walkFileTree(fs.getPath("/"), object : SimpleFileVisitor<Path>() {
+                    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        val name = file.toString()
+                        if (name.endsWith(".class") && !name.contains('$')) {
+                            classes.add(name.substring(1, name.length - 6))
+                        }
+                        return FileVisitResult.CONTINUE
+                    }
+                })
+            }
+            val classesUnit = unit.subUnit(classes.size)
+            for (lib in libs) {
+                OPENED_LIBRARIES.computeIfAbsent(lib, ::getJarFileSystem)
+            }
+            decompiler.decompile(artifacts, version.id, jar, outputDir, libs) {
+                if (it.replace('.', '/') in classes) classesUnit.done++
+            }.thenApply {
+                classesUnit.done = classes.size
+                it
+            }
         }
     }.thenCompose {
-        time(version.id, "postProcessSources", postProcessSources(it, javaOut, postProcessors))
+        unit(time(version.id, "postProcessSources", postProcessSources(it, javaOut, postProcessors)))
     }.thenCompose {
-        extractGradleAndExtraSources(version, out)
+        unit(extractGradleAndExtraSources(version, out))
     }.thenApply {
+        unit.tasks++
         tmpOutFs?.close()
         tmpOutPath?.apply(::rmrf)
         closeOutput(version.id)
+        unit.done++
         out
     }.exceptionally { throw RuntimeException("Error generating sources for ${version.id}", it) }
 }

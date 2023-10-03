@@ -309,9 +309,8 @@ fun useResourceFileSystem(cls: Class<*>, fn: (Path) -> Unit) {
         "file" -> fn(Paths.get(uri).parent)
         "jar" -> {
             try {
-                FileSystems.newFileSystem(uri, emptyMap<String, Any>()).use {
-                    fn(it.getPath("/"))
-                }
+                // FIXME: this file system isn't closed because it has multiple users
+                fn(FileSystems.newFileSystem(uri, emptyMap<String, Any>()).getPath("/"))
             } catch (e: FileSystemAlreadyExistsException) {
                 fn(FileSystems.getFileSystem(uri).getPath("/"))
             }
