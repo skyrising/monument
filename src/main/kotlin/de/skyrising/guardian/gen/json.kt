@@ -171,6 +171,7 @@ fun getDecompiler(id: String) = when (id) {
     "forgeflower" -> Decompiler.FORGEFLOWER
     "fabriflower" -> Decompiler.FABRIFLOWER
     "quiltflower" -> Decompiler.QUILTFLOWER
+    "vineflower" -> Decompiler.VINEFLOWER
     "procyon" -> Decompiler.PROCYON
     else -> throw IllegalArgumentException("Unknown decompiler '$id'")
 }

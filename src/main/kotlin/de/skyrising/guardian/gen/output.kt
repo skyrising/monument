@@ -14,8 +14,12 @@ val outputsByThread = linkedMapOf<Thread, String>()
 private var outputEnabled = false
 val sysOut = System.out
 private val sysErr = System.err
-private val outputToKey = ThreadLocal<String?>()
-private val outputListener = ThreadLocal<((String) -> Unit)?>()
+private val outputToKey = ConcurrentHashMap<ThreadGroup, String?>()
+private val outputListener = ConcurrentHashMap<ThreadGroup, ((String) -> Unit)?>()
+
+fun getOutputKey(thread: Thread = Thread.currentThread()): String {
+    return outputToKey[thread.threadGroup] ?: thread.threadGroup.name
+}
 
 fun enableOutput() {
     outputEnabled = true
@@ -23,14 +27,14 @@ fun enableOutput() {
         disableOutput()
         e.printStackTrace()
     }
-    fun outStream(key: String) = PrintStream(object : OutputStream() {
+    fun outStream() = PrintStream(object : OutputStream() {
         private val line = StringBuilder()
         override fun write(b: Int) {
-            val k = outputToKey.get() ?: Thread.currentThread().name
+            val k = getOutputKey()
             getOutputPrintStream(k).write(b)
             if (b == '\n'.code) {
                 val str = line.toString()
-                outputListener.get()?.invoke(str)
+                outputListener[Thread.currentThread().threadGroup]?.invoke(str)
                 outputs[k] = str
                 line.clear()
             } else {
@@ -39,12 +43,12 @@ fun enableOutput() {
         }
 
         override fun flush() {
-            val k = outputToKey.get() ?: key
+            val k = getOutputKey()
             getOutputPrintStream(k).flush()
         }
     }, false, StandardCharsets.UTF_8)
-    System.setOut(outStream("sysout"))
-    System.setErr(outStream("syserr"))
+    System.setOut(outStream())
+    System.setErr(outStream())
 }
 
 fun disableOutput() {
@@ -66,30 +70,32 @@ fun output(key: String, line: String) {
 }
 
 fun getOutputPrintStream(key: String) = outputStreams.computeIfAbsent(key) {
-    PrintStream(FileOutputStream("logs/$key.log"))
+    PrintStream(FileOutputStream("logs/$key.log")).also { it.println(Thread.currentThread().threadGroup.name) }
 }
 
 fun <R> outputTo(key: String, cb: () -> R): R {
     synchronized(outputsByThread) {
         outputsByThread[Thread.currentThread()] = key
     }
-    outputToKey.set(key)
+    val group = Thread.currentThread().threadGroup
+    outputToKey[group] = key
     try {
         return cb()
     } catch (t: Throwable) {
         t.printStackTrace(getOutputPrintStream(key))
         throw RuntimeException(t)
     } finally {
-        outputToKey.set(null)
+        outputToKey.remove(group)
     }
 }
 
 fun <R> listen(listener: (String) -> Unit, cb: () -> R): R {
-    outputListener.set(listener)
+    val group = Thread.currentThread().threadGroup
+    outputListener[group] = listener
     try {
         return cb()
     } finally {
-        outputListener.set(null)
+        outputListener.remove(group)
     }
 }
 

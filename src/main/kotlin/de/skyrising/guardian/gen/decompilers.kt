@@ -38,6 +38,7 @@ interface Decompiler {
         val FORGEFLOWER = JavaDecompiler("forgeflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
         val FABRIFLOWER = JavaDecompiler("fabriflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
         val QUILTFLOWER = JavaDecompiler("quiltflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
+        val VINEFLOWER = JavaDecompiler("vineflower", "de.skyrising.guardian.gen.FernflowerDecompileTask")
         val PROCYON = JavaDecompiler("procyon", "de.skyrising.guardian.gen.ProcyonDecompileTask")
     }
 }
@@ -165,6 +166,7 @@ open class FernflowerDecompileTask : DecompileTask {
         }
         args.add("-${IFernflowerPreferences.REMOVE_SYNTHETIC}=1")
         args.add("-${IFernflowerPreferences.DECOMPILE_GENERIC_SIGNATURES}=1")
+        args.add("-${IFernflowerPreferences.THREADS}=1")
         if ("pam" in defaults) {
             args.add("-pam=1")
         }
@@ -190,7 +192,8 @@ open class FernflowerDecompileTask : DecompileTask {
         }
         Timer(version, "decompile").use {
             listen({ line ->
-                val cls = line.substringAfter("Decompiling class ", "")
+                var cls = line.substringAfter("Decompiling class ", "")
+                if (cls.isEmpty()) cls = line.substringAfter("Preprocessing class ", "")
                 if (cls.isNotEmpty()) listener(cls)
             }) {
                 ConsoleDecompiler.main(getArgs(clsOutput, srcOutput, cp, IFernflowerPreferences.DEFAULTS))

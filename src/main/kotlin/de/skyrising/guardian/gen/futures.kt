@@ -1,6 +1,7 @@
 package de.skyrising.guardian.gen
 
 import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.streams.toList
 
@@ -71,8 +72,18 @@ fun <K, V> deduplicate(map: MutableMap<K, CompletableFuture<V>>, key: K, future:
     return modifiedFuture
 }
 
+object CustomThreadFactory : ThreadFactory {
+    val group = Thread.currentThread().threadGroup
+    val subGroupCount = AtomicInteger()
+
+    override fun newThread(r: Runnable): Thread {
+        val newGroup = ThreadGroup(group, "custom-${subGroupCount.incrementAndGet()}")
+        return Thread(newGroup, r, newGroup.name + "-main")
+    }
+}
+
 class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism: Int, threadFactory: ThreadFactory) : AbstractExecutorService(), CustomExecutorService {
-    constructor(parallelism: Int) : this(parallelism, maxOf(parallelism - 2, 1), Executors.defaultThreadFactory())
+    constructor(parallelism: Int) : this(parallelism, maxOf(parallelism - 2, 1), CustomThreadFactory)
 
     companion object {
         val DEBUG = System.getProperty("monument.scheduler.debug").toBoolean()

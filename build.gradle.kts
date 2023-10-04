@@ -32,7 +32,7 @@ dependencies {
     implementation("org.jline:jline-terminal:3.21.0")
 
     compileOnly("org.bitbucket.mstrobel:procyon-compilertools:0.5.36")
-    compileOnly("org.quiltmc:quiltflower:1.8.0")
+    compileOnly("org.vineflower:vineflower:1.9.3")
     compileOnly("org.benf:cfr:0.151")
 }
 
