@@ -81,7 +81,7 @@ fun mapJar(version: String, input: Path, mappings: MappingTree, provider: String
     return mapJar(version, input, output, mappings, namespace).thenApply { output }
 }
 
-fun mapJar(version: String, input: Path, output: Path, mappings: MappingTree, namespace: Int = mappings.namespaces.size - 1) = supplyAsync {
+fun mapJar(version: String, input: Path, output: Path, mappings: MappingTree, namespace: Int = mappings.namespaces.size - 1) = supplyAsync(TaskType.REMAP) {
     getJarFileSystem(input).use { inFs ->
         createJarFileSystem(output).use { outFs ->
             val inRoot = inFs.getPath("/")

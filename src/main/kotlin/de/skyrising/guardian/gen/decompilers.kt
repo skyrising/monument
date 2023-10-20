@@ -82,7 +82,7 @@ class JavaDecompiler(name: String, private val taskClassName: String, private va
         cp: List<Path>?,
         listener: (String) -> Unit
     ): CompletableFuture<Path> = getMavenArtifacts(artifacts).thenCompose { urls: List<URI> ->
-        supplyAsyncDecompile {
+        supplyAsync(TaskType.DECOMPILE) {
             outputTo(version) {
                 val classLoader = if (allowSharing(artifacts)) {
                     classLoaders.computeIfAbsent(urls, this::createClassLoader)

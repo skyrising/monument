@@ -33,7 +33,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-fun mergeJars(version: String, client: Path, server: Path, merged: Path) = supplyAsync {
+fun mergeJars(version: String, client: Path, server: Path, merged: Path) = supplyAsync(TaskType.MERGE_JAR) {
     Files.createDirectories(merged.parent)
     JarMerger(client, server, merged).use { merger ->
         merger.enableSnowmanRemoval()
@@ -121,8 +121,8 @@ class JarMerger(inputClient: Path, inputServer: Path, output: Path) :
         try {
             val listener = progressListener
             listener?.init(0, "Reading JAR entries")
-            val cFuture = supplyAsync { readToMap(inputClient) }
-            val sFuture = supplyAsync { readToMap(inputServer) }
+            val cFuture = supplyAsync(TaskType.READ_MAPPINGS) { readToMap(inputClient) }
+            val sFuture = supplyAsync(TaskType.READ_MAPPINGS) { readToMap(inputServer) }
             CompletableFuture.allOf(cFuture, sFuture).join()
             entriesClient = cFuture.get()
             entriesServer = sFuture.get()
@@ -131,7 +131,7 @@ class JarMerger(inputClient: Path, inputServer: Path, output: Path) :
             val entriesOut = ConcurrentHashMap<String, Entry?>()
             listener?.init(entriesAll.size, "Merging JAR entries")
             val mergeCounter = AtomicInteger()
-            service.invokeAll(entriesAll.map {
+            service.invokeAll(TaskType.MERGE_JAR, entriesAll.map {
                 Callable {
                     val entry = mergeEntry(it)
                     listener?.step(mergeCounter.getAndIncrement(), it)

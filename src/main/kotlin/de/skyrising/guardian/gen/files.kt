@@ -20,7 +20,7 @@ fun download(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = nul
     startDownload(it, file, listener)
 }
 
-private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = supplyAsync {
+private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = supplyAsync(TaskType.DOWNLOAD) {
     if (Files.exists(file)) return@supplyAsync
     println("Downloading $url")
     Files.createDirectories(file.parent)
@@ -50,7 +50,7 @@ private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) ->
     }
 }
 
-inline fun <reified T : JsonElement> requestJson(url: URI): CompletableFuture<T> = supplyAsync {
+inline fun <reified T : JsonElement> requestJson(url: URI): CompletableFuture<T> = supplyAsync(TaskType.DOWNLOAD) {
     println("Fetching $url")
     val conn = url.toURL().openConnection() as HttpURLConnection
     conn.connect()
@@ -227,7 +227,7 @@ fun postProcessFile(path: Path, relative: Path, postProcessors: List<PostProcess
     return Pair(outRelative, content)
 }
 
-fun postProcessSources(srcTmpDir: Path, srcDir: Path, postProcessors: List<PostProcessor>) = supplyAsync {
+fun postProcessSources(srcTmpDir: Path, srcDir: Path, postProcessors: List<PostProcessor>) = supplyAsync(TaskType.POST_PROCESS) {
     if (Files.exists(srcDir)) rmrf(srcDir)
     Files.createDirectories(srcDir)
     Files.walk(srcTmpDir).forEach { path ->
@@ -247,7 +247,7 @@ fun postProcessSources(srcTmpDir: Path, srcDir: Path, postProcessors: List<PostP
     }
 }
 
-fun extractResources(jar: Path, out: Path, postProcessors: List<PostProcessor>) = supplyAsync {
+fun extractResources(jar: Path, out: Path, postProcessors: List<PostProcessor>) = supplyAsync(TaskType.EXTRACT_RESOURCE) {
     getJarFileSystem(jar).use { fs ->
         val root = fs.getPath("/")
         Files.walk(root).forEach { path ->
@@ -336,7 +336,7 @@ fun getMavenArtifacts(mvnArtifacts: List<MavenArtifact>): CompletableFuture<List
 
 private object Dummy
 
-fun extractGradleAndExtraSources(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync {
+fun extractGradleAndExtraSources(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync(TaskType.EXTRACT_RESOURCE) {
     useResourceFileSystem(Dummy::class.java) {
         copyCached(it.resolve("gradle_env"), out, RESOURCE_CACHE_DIR)
         copyCached(it.resolve("extra_src"), out.resolve("src/main/java"), RESOURCE_CACHE_DIR)
