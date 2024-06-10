@@ -1,35 +1,37 @@
 package de.skyrising.guardian.gen
 
+import com.sun.management.GarbageCollectionNotificationInfo
 import jdk.jfr.Category
 import jdk.jfr.Event
 import jdk.jfr.Label
 import jdk.jfr.Name
 import java.io.PrintStream
+import java.io.Writer
+import java.lang.management.ManagementFactory
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.*
-import java.util.concurrent.CompletableFuture
+import java.util.zip.GZIPOutputStream
+import javax.management.NotificationEmitter
+import javax.management.openmbean.CompositeData
 
 private val timers = mutableListOf<Timer>()
 
-fun <T> time(version: String, id: String, future: CompletableFuture<T>): CompletableFuture<T> {
-    val timer = Timer(version, id)
-    return future.thenApply {
-        timer.close()
-        it
-    }
-}
-
-class Timer(val version: String, val id: String) : AutoCloseable {
+class Timer(val version: String, val id: String, args: Map<String, Any?> = mapOf()) : AutoCloseable {
     var start = System.nanoTime()
     var end = 0L
+    private val tid = gettid()
     private val event = TimerEvent(version, id)
 
     init {
         if (event.isEnabled) event.begin()
+        TraceEvent.Begin(name = id, cat = "timer,$version", ts = start / 1e3, args = args, tid = tid)
     }
 
     override fun close() {
         if (event.shouldCommit()) event.commit()
         end = System.nanoTime()
+        TraceEvent.End(name = id, ts = end / 1e3, tid = tid)
         timers.add(this)
     }
 }
@@ -74,4 +76,89 @@ fun dumpTimers(out: PrintStream) {
         }
     }
     out.flush()
+}
+
+object TraceEvents {
+    private val GZ = true
+    private lateinit var writer: Writer
+    private var eventCount = 0
+    private val threadSeen = ThreadLocal.withInitial { false }
+    private var active = false
+
+    @Synchronized
+    fun start(path: Path) {
+        writer = if (GZ) GZIPOutputStream(Files.newOutputStream(path.resolveSibling(path.fileName.toString() + ".gz"))).bufferedWriter() else Files.newBufferedWriter(path)
+        writer.write("[\n")
+        active = true
+        TraceEvent.Metadata("process_name", mapOf("name" to "monument"), tid = 0)
+        try {
+            Class.forName("com.sun.management.GcInfo")
+            ManagementFactory.getGarbageCollectorMXBeans().forEach { gc ->
+                (gc as NotificationEmitter).addNotificationListener({ notification, _ ->
+                    if (notification.type != GarbageCollectionNotificationInfo.GARBAGE_COLLECTION_NOTIFICATION) return@addNotificationListener
+                    val info = GarbageCollectionNotificationInfo.from(notification.userData as CompositeData)
+                    val gcInfo = info.gcInfo
+                    val usedBefore = gcInfo.memoryUsageBeforeGc.values.sumOf { it.used }
+                    val usedAfter = gcInfo.memoryUsageAfterGc.values.sumOf { it.used }
+                    TraceEvent.Instant(info.gcName, cat = "gc", s = 'g', args = mapOf(
+                        "name" to info.gcName,
+                        "cause" to info.gcCause,
+                        "action" to info.gcAction,
+                        "used_before" to usedBefore,
+                        "used_after" to usedAfter,
+                        "duration" to gcInfo.duration
+                    ))
+                    TraceEvent.Counter("Heap", ts = System.nanoTime() / 1e3 - gcInfo.duration * 1e3, args = gcInfo.memoryUsageBeforeGc.mapValues { (_, v) -> v.used })
+                    TraceEvent.Counter("Heap", args = gcInfo.memoryUsageAfterGc.mapValues { (_, v) -> v.used })
+                }, null, null)
+            }
+        } catch (ignored: ClassNotFoundException) {}
+    }
+
+    @Synchronized
+    fun emit(event: TraceEvent) {
+        if (!active) return
+        if (!threadSeen.get()) {
+            threadSeen.set(true)
+            TraceEvent.Metadata("thread_name", mapOf("name" to Thread.currentThread().name))
+        }
+        if (eventCount++ > 0) writer.write(",\n")
+        GSON.toJson(event, writer)
+        writer.flush()
+    }
+
+    @Synchronized
+    fun stop() {
+        active = false
+        writer.write("]\n")
+        writer.close()
+    }
+}
+
+val PID = ProcessHandle.current().pid()
+
+fun gettid() = Thread.currentThread().id.toInt()
+
+sealed interface TraceEvent {
+    val ph: Char
+    data class Begin(val name: String, val cat: String = "", val ts: Double = System.nanoTime() / 1e3, val pid: Long = PID, val tid: Int = gettid(), val args: Map<String, Any?> = mapOf()) : TraceEvent {
+        override val ph = 'B'
+        init { TraceEvents.emit(this) }
+    }
+    data class End(val name: String, val ts: Double = System.nanoTime() / 1e3, val pid: Long = PID, val tid: Int = gettid()) : TraceEvent {
+        override val ph = 'E'
+        init { TraceEvents.emit(this) }
+    }
+    data class Metadata(val name: String, val args: Map<String, Any?>, val cat: String = "__metadata", val ts: Double = System.nanoTime() / 1e3, val pid: Long = PID, val tid: Int = gettid()) : TraceEvent {
+        override val ph = 'M'
+        init { TraceEvents.emit(this) }
+    }
+    data class Instant(val name: String, val cat: String = "", val s: Char = 't', val ts: Double = System.nanoTime() / 1e3, val pid: Long = PID, val tid: Int = gettid(), val args: Map<String, Any?> = mapOf()) : TraceEvent {
+        override val ph = 'i'
+        init { TraceEvents.emit(this) }
+    }
+    data class Counter(val name: String, val cat: String = "", val ts: Double = System.nanoTime() / 1e3, val pid: Long = PID, val args: Map<String, Any?> = mapOf()) : TraceEvent {
+        override val ph = 'C'
+        init { TraceEvents.emit(this) }
+    }
 }

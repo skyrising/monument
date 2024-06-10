@@ -25,9 +25,16 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
     val trees = linkedMapOf<String, String>()
     val commits = linkedMapOf<String, String>()
     if (Files.exists(REPO_DIR.resolve("refs/heads/$branch")) && !recommitFull) {
-        git(TEMP_REPO_DIR.parent, "clone", REPO_DIR.toAbsolutePath().toString(), TEMP_REPO_DIR.fileName.toString()).join()
-        git(TEMP_REPO_DIR, "checkout", branch).join()
-        for (line in gitLines(TEMP_REPO_DIR, "log", "--format=%H%T%s", "--reverse").join()) {
+        immediate {
+            git(
+                TEMP_REPO_DIR.parent,
+                "clone",
+                REPO_DIR.toAbsolutePath().toString(),
+                TEMP_REPO_DIR.fileName.toString()
+            )
+        }
+        immediate { git(TEMP_REPO_DIR, "checkout", branch) }
+        for (line in immediate { gitLines(TEMP_REPO_DIR, "log", "--format=%H%T%s", "--reverse") }) {
             val message = line.substring(80)
             commits[message] = line.substring(0, 40)
             trees[message] = line.substring(40, 80)
@@ -36,9 +43,9 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
             if (!it.endsWith(".git")) rmrf(it)
         }
     } else {
-        git(TEMP_REPO_DIR, "init").join()
-        git(TEMP_REPO_DIR, "remote", "add", "origin", REPO_DIR.toAbsolutePath().toString()).join()
-        git(TEMP_REPO_DIR, "checkout", "-b", branch).join()
+        immediate { git(TEMP_REPO_DIR, "init") }
+        immediate { git(TEMP_REPO_DIR, "remote", "add", "origin", REPO_DIR.toAbsolutePath().toString()) }
+        immediate { git(TEMP_REPO_DIR, "checkout", "-b", branch) }
     }
     if (recommitIndex >= 0) {
         for (i in recommitIndex until history.size) {
@@ -59,22 +66,24 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
                 Files.move(it, dest)
             }
             println("$id: ${commit.source.toAbsolutePath()}")
-            git(TEMP_REPO_DIR, "add", ".").join()
-            val tree = gitWriteTree(TEMP_REPO_DIR).join()
+            immediate { git(TEMP_REPO_DIR, "add", ".") }
+            val tree = immediate { gitWriteTree(TEMP_REPO_DIR) }
             trees[id] = tree
-            val commitHash = gitCommitTree(TEMP_REPO_DIR, tree, commit.version.releaseTime, config, commit.parents.map {
-                commits[it.version.id] ?: throw IllegalStateException("Cannot find previous commit for $it")
-            }, id).join()
+            val commitHash = immediate {
+                gitCommitTree(TEMP_REPO_DIR, tree, commit.version.releaseTime, config, commit.parents.map {
+                    commits[it.version.id] ?: throw IllegalStateException("Cannot find previous commit for $it")
+                }, id)
+            }
             commits[id] = commitHash
             val tag = if (branch == "master") id else "$branch-$id"
-            git(TEMP_REPO_DIR, "tag", "--force", tag, commitHash).join()
+            immediate { git(TEMP_REPO_DIR, "tag", "--force", tag, commitHash) }
             // for (repoFile in destFiles) rmrf(repoFile)
             for ((a, b) in destFiles) Files.move(a, b)
         }
     }
-    git(TEMP_REPO_DIR, "reset", "--hard", commits[history.last().version.id]!!).join()
-    git(TEMP_REPO_DIR, "push", "--force", "--set-upstream", "origin", branch).join()
-    git(TEMP_REPO_DIR, "push", "--tags", "--force").join()
+    immediate { git(TEMP_REPO_DIR, "reset", "--hard", commits[history.last().version.id]!!) }
+    immediate { git(TEMP_REPO_DIR, "push", "--force", "--set-upstream", "origin", branch) }
+    immediate { git(TEMP_REPO_DIR, "push", "--tags", "--force") }
     val gcLock = TEMP_REPO_DIR.resolve(".git/gc.log.lock")
     while (Files.exists(gcLock)) {
         Thread.sleep(100)
@@ -101,7 +110,9 @@ fun run(dir: Path, env: Map<String, String>?, command: List<String>): Completabl
     pb.redirectError(ProcessBuilder.Redirect.INHERIT)
     pb.directory(dir.toFile())
     val p = pb.start()
-    return CompletableFuture.supplyAsync { Pair(p.waitFor(), p) }
+    return supplyAsync(TaskType.GIT) {
+        Timer("", "${command[0]} ${command[1]}", mapOf("command" to command)).use { Pair(p.waitFor(), p) }
+    }
 }
 
 fun gitLines(dir: Path, vararg args: String): CompletableFuture<List<String>> {
@@ -115,10 +126,12 @@ fun gitLines(dir: Path, vararg args: String): CompletableFuture<List<String>> {
     val p = pb.start()
     val lines = mutableListOf<String>()
     p.inputStream.reader().forEachLine { lines.add(it) }
-    return CompletableFuture.supplyAsync {
-        val code = p.waitFor()
-        if (code != 0) throw RuntimeException("Git call failed: $code")
-        lines
+    return supplyAsync(TaskType.GIT) {
+        Timer("", "${command[0]} ${command[1]}", mapOf("command" to command)).use {
+            val code = p.waitFor()
+            if (code != 0) throw RuntimeException("Git call failed: $code")
+            lines
+        }
     }
 }
 
@@ -141,7 +154,14 @@ fun gitWriteTree(dir: Path): CompletableFuture<String> = run(dir, mapOf(), listO
     result
 }
 
-fun gitCommitTree(dir: Path, tree: String, date: ZonedDateTime, config: GitConfig, parents: List<String>, message: String): CompletableFuture<String> {
+fun gitCommitTree(
+    dir: Path,
+    tree: String,
+    date: ZonedDateTime,
+    config: GitConfig,
+    parents: List<String>,
+    message: String
+): CompletableFuture<String> {
     val command = mutableListOf("git", "commit-tree", tree, "-m")
     command += message
     for (parent in parents) {
@@ -160,7 +180,7 @@ fun getMonumentVersion(): String {
     return try {
         var path = getMonumentClassRoot() ?: Paths.get(".")
         if (!Files.isDirectory(path)) path = path.parent
-        val (code, p) = run(path, null, listOf("git", "describe", "--always", "--tags", "--dirty")).join()
+        val (code, p) = immediate { run(path, null, listOf("git", "describe", "--always", "--tags", "--dirty")) }
         if (code != 0) return "unknown"
         p.inputStream.bufferedReader().readText().trim()
     } catch (e: Exception) {

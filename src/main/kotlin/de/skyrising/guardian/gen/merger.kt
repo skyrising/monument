@@ -28,14 +28,11 @@ import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributeView
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.*
-import java.util.concurrent.Callable
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 
 fun mergeJars(version: String, client: Path, server: Path, merged: Path) = supplyAsync(TaskType.MERGE_JAR) {
     Files.createDirectories(merged.parent)
-    JarMerger(client, server, merged).use { merger ->
+    JarMerger(version, client, server, merged).use { merger ->
         merger.enableSnowmanRemoval()
         merger.enableRecordFixer()
         merger.setProgressListener(VersionedProgressListener(version, "Merging jars..."))
@@ -43,7 +40,7 @@ fun mergeJars(version: String, client: Path, server: Path, merged: Path) = suppl
     }
 }
 
-class JarMerger(inputClient: Path, inputServer: Path, output: Path) :
+class JarMerger(val version: String, inputClient: Path, inputServer: Path, output: Path) :
     AutoCloseable {
     inner class Entry(val path: Path, val metadata: BasicFileAttributes, val data: ByteArray?)
 
@@ -101,7 +98,7 @@ class JarMerger(inputClient: Path, inputServer: Path, output: Path) :
         if (attr.isDirectory) return null
         if (!path.fileName.toString().endsWith(".class")) {
             if (path.toString() == "/META-INF/MANIFEST.MF") {
-                return  Entry(
+                return Entry(
                     path, attr,
                     "Manifest-Version: 1.0\nMain-Class: net.minecraft.client.Main\n".toByteArray()
                 )
@@ -117,47 +114,48 @@ class JarMerger(inputClient: Path, inputServer: Path, output: Path) :
 
     @Throws(IOException::class)
     fun merge() {
-        val service = threadLocalContext.get().executor
         try {
             val listener = progressListener
-            listener?.init(0, "Reading JAR entries")
-            val cFuture = supplyAsync(TaskType.READ_MAPPINGS) { readToMap(inputClient) }
-            val sFuture = supplyAsync(TaskType.READ_MAPPINGS) { readToMap(inputServer) }
-            CompletableFuture.allOf(cFuture, sFuture).join()
-            entriesClient = cFuture.get()
-            entriesServer = sFuture.get()
-            entriesAll.addAll(entriesClient.keys)
-            entriesAll.addAll(entriesServer.keys)
+            Timer(version, "mergeJars.read").use {
+                listener?.init(0, "Reading JAR entries")
+                val cFuture = supplyAsync(TaskType.READ_MERGE_INPUT_JAR) { readToMap(inputClient) }
+                entriesServer = readToMap(inputServer)
+                entriesClient = cFuture.get()
+                entriesAll.addAll(entriesClient.keys)
+                entriesAll.addAll(entriesServer.keys)
+            }
             val entriesOut = ConcurrentHashMap<String, Entry?>()
-            listener?.init(entriesAll.size, "Merging JAR entries")
-            val mergeCounter = AtomicInteger()
-            service.invokeAll(TaskType.MERGE_JAR, entriesAll.map {
-                Callable {
-                    val entry = mergeEntry(it)
-                    listener?.step(mergeCounter.getAndIncrement(), it)
+            Timer(version, "mergeJars.merge").use {
+                listener?.init(entriesAll.size, "Merging JAR entries")
+                var mergeCounter = 0
+                for (e in entriesAll) {
+                    val entry = mergeEntry(e)
+                    listener?.step(mergeCounter++, e)
                     if (entry != null) entriesOut[entry.path.toString().substring(1)] = entry
                 }
-            })
-            listener?.init(entriesOut.size, "Writing merged JAR entries")
-            var writeCounter = 0
-            for (e in entriesAll) {
-                val entry = entriesOut[e] ?: continue
-                val ePath = entry.path.toString()
-                listener?.step(writeCounter++, ePath.substring(1))
-                val outPath = outputFs.getPath(ePath)
-                if (outPath.parent != null) {
-                    Files.createDirectories(outPath.parent)
+            }
+            Timer(version, "mergeJars.write").use {
+                listener?.init(entriesOut.size, "Writing merged JAR entries")
+                var writeCounter = 0
+                for (e in entriesAll) {
+                    val entry = entriesOut[e] ?: continue
+                    val ePath = entry.path.toString()
+                    listener?.step(writeCounter++, ePath.substring(1))
+                    val outPath = outputFs.getPath(ePath)
+                    if (outPath.parent != null) {
+                        Files.createDirectories(outPath.parent)
+                    }
+                    if (entry.data != null) {
+                        Files.write(outPath, entry.data, StandardOpenOption.CREATE_NEW)
+                    } else {
+                        Files.copy(entry.path, outPath)
+                    }
+                    Files.getFileAttributeView(outPath, BasicFileAttributeView::class.java).setTimes(
+                        entry.metadata.creationTime(),
+                        entry.metadata.lastAccessTime(),
+                        entry.metadata.lastModifiedTime()
+                    )
                 }
-                if (entry.data != null) {
-                    Files.write(outPath, entry.data, StandardOpenOption.CREATE_NEW)
-                } else {
-                    Files.copy(entry.path, outPath)
-                }
-                Files.getFileAttributeView(outPath, BasicFileAttributeView::class.java).setTimes(
-                    entry.metadata.creationTime(),
-                    entry.metadata.lastAccessTime(),
-                    entry.metadata.lastModifiedTime()
-                )
             }
         } catch (e: InterruptedException) {
             e.printStackTrace()

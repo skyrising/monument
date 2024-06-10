@@ -53,10 +53,15 @@ abstract class CommonMappingProvider(override val name: String, override val for
         val mappingsFile = getPath(cache, version, mappings).resolve("mappings-${target.id}.${ext}")
         return getUrl(getPath(cache, version, mappings), version, mappings, target).thenCompose { url ->
             if (url == null) CompletableFuture.completedFuture(Unit) else download(url, mappingsFile)
-        }.thenApplyAsync {
-            if (!Files.exists(mappingsFile)) return@thenApplyAsync null
-            val tree = Files.newBufferedReader(mappingsFile).use(format::parse)
-            if (invert != null) Timer(version.id, "mappings.invert.${target.id}").use { tree.invert(invert) } else tree
+        }.thenCompose {
+            if (!Files.exists(mappingsFile)) return@thenCompose CompletableFuture.completedFuture(null)
+            supplyAsync(TaskType.READ_MAPPINGS) {
+                val tree = Files.newBufferedReader(mappingsFile).use(format::parse)
+                if (invert != null) Timer(
+                    version.id,
+                    "mappings.invert.${target.id}"
+                ).use { tree.invert(invert) } else tree
+            }
         }
     }
 

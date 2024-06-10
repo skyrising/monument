@@ -20,6 +20,18 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.system.exitProcess
 
+val INITIAL_MAX_THREADS = maxOf(Runtime.getRuntime().availableProcessors() - 2, 1)
+var MAX_THREADS = INITIAL_MAX_THREADS
+
+val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context.default }
+
+val _t = run {
+    TraceEvents.start(Path.of("logs", "trace.json"))
+    Runtime.getRuntime().addShutdownHook(Thread {
+        TraceEvents.stop()
+    })
+}
+
 val MONUMENT_VERSION = getMonumentVersion()
 
 val MAVEN_CENTRAL = URI("https://repo1.maven.org/maven2/")
@@ -47,9 +59,6 @@ val CACHE_DIR: Path = Path.of(System.getenv("MONUMENT_CACHE") ?: ".cache")
 val RESOURCE_CACHE_DIR: Path = CACHE_DIR.resolve("resources")
 val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
-val INITIAL_MAX_THREADS = maxOf(Runtime.getRuntime().availableProcessors() - 2, 1)
-var MAX_THREADS = INITIAL_MAX_THREADS
-
 private val UNICODE_PROGRESS_BLOCKS = charArrayOf(' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█')
 
 val TERMINAL = TerminalBuilder.terminal()
@@ -62,7 +71,7 @@ fun main(args: Array<String>) {
     Files.createDirectories(CACHE_DIR)
     if (FlightRecorder.isAvailable() && !FlightRecorder.getFlightRecorder().recordings.stream().map(Recording::getState).anyMatch { it == RecordingState.NEW || it == RecordingState.RUNNING }) {
         val conf = Configuration.create(Context::class.java.getResourceAsStream("/flightrecorder-config.jfc")!!.reader())
-        val dateString = SimpleDateFormat("yyyy-MM-dd-hh-mm-ss").format(Date())
+        val dateString = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss").format(Date())
         val recording = Recording(conf)
         recording.dumpOnExit = true
         recording.isToDisk = true
@@ -193,7 +202,7 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     val versions = if (manifest != null) {
         parseVersionManifest(GSON.fromJson(Files.newBufferedReader(manifest)))
     } else {
-        getMcVersions().join()
+        immediate { getMcVersions() }
     }
     val newest = linkVersions(versions)
     fun getVersion(id: String?): VersionInfo? {
@@ -204,12 +213,14 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     val head = (if (branchConfig.head == null) newest else getVersion(branchConfig.head))
         ?: throw IllegalStateException("No head version found")
     println("Finding path from ${base ?: "the beginning"} to $head")
-    val branchVersions = findPredecessors(head, base) {
-        branchConfig.filter(it) && (
-            immediate { mappings.supportsVersion(it, MappingTarget.MERGED) }
-            || immediate { mappings.supportsVersion(it, MappingTarget.CLIENT) }
-            || immediate { mappings.supportsVersion(it, MappingTarget.SERVER) }
-        )
+    val branchVersions = Timer("", "findPredecessors").use {
+        findPredecessors(head, base) {
+            branchConfig.filter(it) && (
+                    immediate { mappings.supportsVersion(it, MappingTarget.MERGED) }
+                            || immediate { mappings.supportsVersion(it, MappingTarget.CLIENT) }
+                            || immediate { mappings.supportsVersion(it, MappingTarget.SERVER) }
+                    )
+        }
     }
     if (branchVersions.isEmpty()) {
         System.err.println("No path found")
@@ -227,6 +238,8 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     if (missing.isNotEmpty()) {
         val futures = mutableListOf<CompletableFuture<Void>>()
         enableOutput()
+        val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
+        executor.decompileParallelism = minOf(executor.decompileParallelism, missing.size)
         val progressUnits = mutableListOf<ProgressUnit>()
         for (version in missing) {
             val unit = ProgressUnit(2, 0)
@@ -321,7 +334,7 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
     val time = (System.currentTimeMillis() - startTime) / 1000.0
     threadLocalContext.get().executor.shutdownNow()
     println(String.format(Locale.ROOT, "Done in %.3fs", time))
-    dumpTimers(System.out)
+    //dumpTimers(System.out)
 }
 
 fun spellVersions(count: Int) = if (count == 1) "$count version" else "$count versions"
@@ -352,56 +365,60 @@ fun genSources(unit: ProgressUnit, version: VersionInfo, provider: MappingProvid
         "Monument version: $MONUMENT_VERSION",
         "Decompiler: " + decompilerMap[decompiler]!!.first().artifact
     ))
-    return unit(getJar(version, MappingTarget.CLIENT)).thenCompose { jar ->
-        if (Files.exists(resOut)) rmrf(resOut)
-        unit(time(version.id, "extractResources", extractResources(jar, resOut, postProcessors)))
-    }.thenCompose {
-        val metaInf = resOut.resolve("META-INF")
-        if (Files.exists(metaInf)) rmrf(metaInf)
-        val jarFuture = unit(getMappedMergedJar(version, provider))
-        val libsFuture = unit(downloadLibraries(version))
-        CompletableFuture.allOf(jarFuture, libsFuture).thenCompose {
-            val jar = jarFuture.get()
-            val libs = libsFuture.get()
-            output(version.id, "Decompiling with ${decompiler.name}")
-            val artifacts = decompilerMap[decompiler]!!
-            val outputDir: (Boolean) -> Path = {
-                if (it) {
-                    val fs = Jimfs.newFileSystem()
-                    tmpOutFs = fs
-                    fs.rootDirectories.first()
-                } else {
-                    val tmpOut = out.resolve("src/main/java-tmp")
-                    tmpOutPath = tmpOut
-                    Files.createDirectories(tmpOut)
-                    tmpOut
-                }
-            }
-            val classes = HashSet<String>(4096)
-            getJarFileSystem(jar).use { fs ->
-                Files.walkFileTree(fs.getPath("/"), object : SimpleFileVisitor<Path>() {
-                    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                        val name = file.toString()
-                        if (name.endsWith(".class") && !name.contains('$')) {
-                            classes.add(name.substring(1, name.length - 6))
-                        }
-                        return FileVisitResult.CONTINUE
-                    }
-                })
-            }
-            val classesUnit = unit.subUnit(classes.size)
-            for (lib in libs) {
-                OPENED_LIBRARIES.computeIfAbsent(lib, ::getJarFileSystem)
-            }
-            decompiler.decompile(artifacts, version.id, jar, outputDir, libs) {
-                if (it.replace('.', '/') in classes) classesUnit.done++
-            }.thenApply {
-                classesUnit.done = classes.size
-                it
+    val jarFuture = unit(getMappedMergedJar(version, provider))
+    val libsFuture = unit(downloadLibraries(version))
+    return CompletableFuture.allOf(jarFuture, libsFuture).thenCompose {
+        val extractResources = unit(getJar(version, MappingTarget.CLIENT)).thenCompose { jar ->
+            if (Files.exists(resOut)) rmrf(resOut)
+            unit(extractResources(version.id, jar, resOut, postProcessors))
+        }
+        val jar = jarFuture.get()
+        val libs = libsFuture.get()
+        output(version.id, "Decompiling with ${decompiler.name}")
+        val artifacts = decompilerMap[decompiler]!!
+        val outputDir: (Boolean) -> Path = {
+            if (it) {
+                val fs = Jimfs.newFileSystem()
+                tmpOutFs = fs
+                fs.rootDirectories.first()
+            } else {
+                val tmpOut = out.resolve("src/main/java-tmp")
+                tmpOutPath = tmpOut
+                Files.createDirectories(tmpOut)
+                tmpOut
             }
         }
+        val classes = HashSet<String>(4096)
+        getJarFileSystem(jar).use { fs ->
+            Files.walkFileTree(fs.getPath("/"), object : SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    val name = file.toString()
+                    if (name.endsWith(".class") && !name.contains('$')) {
+                        classes.add(name.substring(1, name.length - 6))
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+            })
+        }
+        val classesUnit = unit.subUnit(classes.size)
+        for (lib in libs) {
+            OPENED_LIBRARIES.computeIfAbsent(lib, ::getJarFileSystem)
+        }
+        val decompile = decompiler.decompile(artifacts, version.id, jar, outputDir, libs) { className, addExtra ->
+            if (className.replace('.', '/') in classes) {
+                TraceEvent.Instant(name = "${if (addExtra) "Preprocessing" else "Decompiled"} Class", cat = "decompile,${version.id}", args = mapOf("class" to className))
+                classesUnit.done++
+                if (addExtra) classesUnit.tasks++
+            }
+        }
+        CompletableFuture.allOf(decompile, extractResources).thenApply {
+            classesUnit.done = classesUnit.tasks
+            val metaInf = resOut.resolve("META-INF")
+            if (Files.exists(metaInf)) rmrf(metaInf)
+            decompile.get()
+        }
     }.thenCompose {
-        unit(time(version.id, "postProcessSources", postProcessSources(it, javaOut, postProcessors)))
+        unit(postProcessSources(version.id, it, javaOut, postProcessors))
     }.thenCompose {
         unit(extractGradleAndExtraSources(version, out))
     }.thenApply {
@@ -413,8 +430,6 @@ fun genSources(unit: ProgressUnit, version: VersionInfo, provider: MappingProvid
         out
     }.exceptionally { throw RuntimeException("Error generating sources for ${version.id}", it) }
 }
-
-val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context.default }
 
 data class Context(val executor: CustomExecutorService) {
     companion object {

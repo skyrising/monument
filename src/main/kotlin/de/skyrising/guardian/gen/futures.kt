@@ -2,7 +2,6 @@ package de.skyrising.guardian.gen
 
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.locks.ReentrantLock
 
 fun <T> supplyAsync(type: TaskType, supplier: () -> T): CompletableFuture<T> = CompletableFuture.supplyAsync({ supplier() }, { threadLocalContext.get().executor.execute(it, type) })
 
@@ -19,6 +18,8 @@ inline fun <T> immediate(futured: () -> CompletableFuture<T>): T {
 }
 
 interface CustomExecutorService : ExecutorService {
+    val parallelism: Int
+
     fun execute(command: Runnable, type: TaskType)
 
     @Deprecated("Use execute(command, type) instead", ReplaceWith("execute(command, TaskType.UNKNOWN)"))
@@ -58,6 +59,8 @@ interface CustomExecutorService : ExecutorService {
 class ImmediateExecutorService : AbstractExecutorService(), CustomExecutorService {
     private val thread = Thread.currentThread()
 
+    override val parallelism = 1
+
     @Suppress("NOTHING_TO_INLINE")
     private inline fun checkThread() {
         if (Thread.currentThread() != thread) throw IllegalStateException("Calling immediate executor from wrong thread")
@@ -67,7 +70,7 @@ class ImmediateExecutorService : AbstractExecutorService(), CustomExecutorServic
 
     override fun execute(command: Runnable, type: TaskType) {
         checkThread()
-        command.run()
+        Task(System.nanoTime(), type, command).run()
     }
 
     override fun shutdown() {
@@ -111,6 +114,7 @@ object CustomThreadFactory : ThreadFactory {
 
 enum class TaskType {
     DOWNLOAD,
+    READ_MERGE_INPUT_JAR,
     MERGE_JAR,
     EXTRACT_RESOURCE,
     READ_MAPPINGS,
@@ -118,9 +122,28 @@ enum class TaskType {
     DECOMPILE,
     POST_PROCESS,
     UNKNOWN,
+    GIT,
 }
 
-class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism: Int, threadFactory: ThreadFactory) : AbstractExecutorService(), CustomExecutorService {
+data class Task(val time: Long, val type: TaskType, private val runnable: Runnable): Runnable, Comparable<Task> {
+    override fun compareTo(other: Task): Int {
+        if (type != other.type) return type.compareTo(other.type)
+        if (time != other.time) return time.compareTo(other.time)
+        if (runnable != other.runnable) return -1
+        return 0
+    }
+
+    override fun run() {
+        TraceEvent.Begin(name = type.name, cat = "task,${type.name}", ts = time / 1e3)
+        try {
+            runnable.run()
+        } finally {
+            TraceEvent.End(name = type.name)
+        }
+    }
+}
+
+class CustomThreadPoolExecutor(override val parallelism: Int, initialDecompileParallelism: Int, threadFactory: ThreadFactory) : AbstractExecutorService(), CustomExecutorService {
     constructor(parallelism: Int) : this(parallelism, maxOf(parallelism - 2, 1), CustomThreadFactory)
 
     companion object {
@@ -140,16 +163,14 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
     private val semaphores = Array(TaskType.values().size) { Semaphore(maxTasks(TaskType.values()[it])) }
     private val decompileSemaphore = Semaphore(decompileParallelism)
     private val workers = Array(parallelism) { Worker(it, threadFactory) }
-    private val runnableTasks = PriorityBlockingQueue<Task>()
+    private val runnableTasks = Array(TaskType.values().size) { PriorityBlockingQueue<Task>() }
     private val scheduledTasks = ConcurrentHashMap.newKeySet<Task>()
     private val runningTasks = ConcurrentHashMap.newKeySet<Task>()
-    private val terminated = ReentrantLock().newCondition()
+    private val terminated = Object()
+    private val runnableTasksChanged = Object()
     @Volatile
     private var running = true
-
-    init {
-        for (worker in workers) worker.thread.start()
-    }
+    private val runningWorkers = AtomicInteger()
 
     private fun maxTasks(type: TaskType): Int {
         return when (type) {
@@ -159,8 +180,15 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
         }
     }
 
-    private inner class Worker(val id: Int, threadFactory: ThreadFactory): Runnable {
-        val thread: Thread = threadFactory.newThread(this)
+    private inner class Worker(val id: Int, private val threadFactory: ThreadFactory): Runnable {
+        var thread: Thread? = null
+
+        fun start() {
+            if (thread != null) return
+            thread = threadFactory.newThread(this)
+            thread!!.start()
+            runningWorkers.incrementAndGet()
+        }
 
         override fun run() {
             while (running) {
@@ -171,12 +199,17 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
                 }
                 try {
                     if (DEBUG) output("scheduler", "Running $task in worker $id")
-                    task.runnable.run()
+                    task.run()
                 } finally {
                     semaphores[task.type.ordinal].release()
                     runningTasks.remove(task)
+                    synchronized(runnableTasksChanged) {
+                        runnableTasksChanged.notify()
+                    }
                     if (!running && scheduledTasks.isEmpty() && runningTasks.isEmpty()) {
-                        terminated.signalAll()
+                        synchronized(terminated) {
+                            terminated.notifyAll()
+                        }
                     }
                 }
             }
@@ -185,29 +218,28 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
         @Throws(InterruptedException::class)
         private fun waitForNextTask(): Task {
             if (DEBUG) output("scheduler", "Worker $id is waiting for task")
-            val task = runnableTasks.take()
-            try {
-                val semaphore = semaphores[task.type.ordinal]
-                if (!semaphore.tryAcquire()) {
-                    if (DEBUG) output("scheduler", "Worker $id is awaiting semaphore for $task, queue length: ${semaphore.queueLength}")
-                    semaphore.acquire()
+            while (true) {
+                for (type in TaskType.values()) {
+                    try {
+                        val semaphore = semaphores[type.ordinal]
+                        if (semaphore.tryAcquire()) {
+                            val task = runnableTasks[type.ordinal].poll()
+                            if (task != null) {
+                                runningTasks.add(task)
+                                scheduledTasks.remove(task)
+                                return task
+                            } else {
+                                semaphore.release()
+                            }
+                        }
+                    } catch (e: InterruptedException) {
+                        throw e
+                    }
                 }
-            } catch (e: InterruptedException) {
-                runnableTasks.add(task)
-                throw e
+                synchronized(runnableTasksChanged) {
+                    runnableTasksChanged.wait()
+                }
             }
-            runningTasks.add(task)
-            scheduledTasks.remove(task)
-            return task
-        }
-    }
-
-    data class Task(val time: Long, val type: TaskType, val runnable: Runnable): Comparable<Task> {
-        override fun compareTo(other: Task): Int {
-            if (type != other.type) return type.compareTo(other.type)
-            if (time != other.time) return time.compareTo(other.time)
-            if (runnable != other.runnable) return -1
-            return 0
         }
     }
 
@@ -219,7 +251,16 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
         if (!running) throw RejectedExecutionException()
         if (DEBUG || task.type == TaskType.UNKNOWN) output("scheduler", "Scheduling $task")
         scheduledTasks.add(task)
-        runnableTasks.add(task)
+        runnableTasks[task.type.ordinal].add(task)
+        val neededWorkers = runningTasks.size + scheduledTasks.size
+        val runningWorkers = runningWorkers.get()
+        if (semaphores[task.type.ordinal].availablePermits() > 0 && neededWorkers > runningWorkers && runningWorkers < parallelism && workers[runningWorkers].thread == null) {
+            workers[runningWorkers].start()
+        } else {
+            synchronized(runnableTasksChanged) {
+                runnableTasksChanged.notify()
+            }
+        }
     }
 
     override fun shutdown() {
@@ -229,9 +270,9 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
     override fun shutdownNow(): List<Runnable> {
         running = false
         for (worker in workers) {
-            worker.thread.interrupt()
+            worker.thread?.interrupt()
         }
-        return scheduledTasks.stream().map { it.runnable }.toList()
+        return scheduledTasks.toList()
     }
 
     override fun isShutdown(): Boolean {
@@ -245,7 +286,10 @@ class CustomThreadPoolExecutor(val parallelism: Int, initialDecompileParallelism
     override fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean {
         if (isTerminated) return true
         return try {
-            terminated.await(timeout, unit)
+            synchronized(terminated) {
+                terminated.wait(unit.toMillis(timeout), (unit.toNanos(timeout) % 1000000L).toInt())
+            }
+            true
         } catch (e: InterruptedException) {
             false
         }

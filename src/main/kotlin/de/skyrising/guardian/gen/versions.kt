@@ -174,16 +174,18 @@ fun getRealJar(version: VersionInfo, jar: Path, target: MappingTarget): Path {
         fs.close()
         return jar
     }
-    val files = Files.readAllLines(versionListFile)
-    for (file in files) {
-        val parts = file.split('\t')
-        if (parts[1] == version.id || files.size == 1) {
-            val archivedPath = fs.getPath("META-INF/versions", parts[2])
-            Files.copy(archivedPath, realPath)
-            return realPath
+    Timer(version.id, "downloadJar.server.unpack").use {
+        val files = Files.readAllLines(versionListFile)
+        for (file in files) {
+            val parts = file.split('\t')
+            if (parts[1] == version.id || files.size == 1) {
+                val archivedPath = fs.getPath("META-INF/versions", parts[2])
+                Files.copy(archivedPath, realPath)
+                return realPath
+            }
         }
+        throw IllegalStateException("Could not find ${version.id} in the server.jar version.list")
     }
-    throw IllegalStateException("Could not find ${version.id} in the server.jar version.list")
 }
 
 private data class Dependency(val dependency: String, val type: String = "implementation")

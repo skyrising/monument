@@ -20,35 +20,38 @@ fun download(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = nul
     startDownload(it, file, listener)
 }
 
-private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = null) = supplyAsync(TaskType.DOWNLOAD) {
-    if (Files.exists(file)) return@supplyAsync
-    println("Downloading $url")
-    Files.createDirectories(file.parent)
-    if (url.scheme == "file") {
-        Files.copy(Paths.get(url), file)
-        return@supplyAsync
-    }
-    try {
-        val conn = url.toURL().openConnection() as HttpURLConnection
-        conn.connect()
-        val len = conn.getHeaderFieldLong("Content-Length", -1)
-        BufferedInputStream(conn.inputStream).use { input ->
-            Files.newOutputStream(file).use { output ->
-                val buf = ByteArray(4096)
-                var progress = 0L
-                while (true) {
-                    val read = input.read(buf)
-                    if (read == -1) break
-                    output.write(buf, 0, read)
-                    progress += read
-                    if (listener != null) listener(DownloadProgress(len, progress))
+private fun startDownload(url: URI, file: Path, listener: ((DownloadProgress) -> Unit)? = null) =
+    if (Files.exists(file)) CompletableFuture.completedFuture(Unit) else supplyAsync(TaskType.DOWNLOAD) {
+        Timer("", file.toString(), mapOf("url" to url.toString(), "file" to file.toString())).use {
+            if (Files.exists(file)) return@supplyAsync
+            println("Downloading $url")
+            Files.createDirectories(file.parent)
+            if (url.scheme == "file") {
+                Files.copy(Paths.get(url), file)
+                return@supplyAsync
+            }
+            try {
+                val conn = url.toURL().openConnection() as HttpURLConnection
+                conn.connect()
+                val len = conn.getHeaderFieldLong("Content-Length", -1)
+                BufferedInputStream(conn.inputStream).use { input ->
+                    Files.newOutputStream(file).use { output ->
+                        val buf = ByteArray(4096)
+                        var progress = 0L
+                        while (true) {
+                            val read = input.read(buf)
+                            if (read == -1) break
+                            output.write(buf, 0, read)
+                            progress += read
+                            if (listener != null) listener(DownloadProgress(len, progress))
+                        }
+                    }
                 }
+            } catch (e: IOException) {
+                throw IOException("Failed to download $url", e)
             }
         }
-    } catch (e: IOException) {
-        throw IOException("Failed to download $url", e)
     }
-}
 
 inline fun <reified T : JsonElement> requestJson(url: URI): CompletableFuture<T> = supplyAsync(TaskType.DOWNLOAD) {
     println("Fetching $url")
@@ -208,7 +211,7 @@ fun postProcessFile(path: Path, relative: Path, postProcessors: List<PostProcess
     var outRelative = relative
     var content: ByteArray? = null
     val appliedPostProcessors = mutableSetOf<PostProcessor>()
-    outer@while (appliedPostProcessors.size < postProcessors.size) {
+    outer@ while (appliedPostProcessors.size < postProcessors.size) {
         for (processor in postProcessors) {
             if (processor in appliedPostProcessors) continue
             if (processor.matches(outRelative)) {
@@ -229,43 +232,49 @@ fun postProcessFile(path: Path, relative: Path, postProcessors: List<PostProcess
     return Pair(outRelative, content)
 }
 
-fun postProcessSources(srcTmpDir: Path, srcDir: Path, postProcessors: List<PostProcessor>) = supplyAsync(TaskType.POST_PROCESS) {
-    if (Files.exists(srcDir)) rmrf(srcDir)
-    Files.createDirectories(srcDir)
-    Files.walk(srcTmpDir).forEach { path ->
-        if (Files.isDirectory(path)) return@forEach
-        val relative = srcTmpDir.relativize(path)
-        val (outRelative, content) = postProcessFile(path, relative, postProcessors)
-        val fileOut = srcDir.resolve(outRelative.toString())
-        Files.createDirectories(fileOut.parent)
-        if (content != null) {
-            Files.write(fileOut, content)
-        } else {
-            Files.copy(path, fileOut)
-        }
-    }
-    if (srcTmpDir.fileSystem != FileSystems.getDefault()) {
-        srcTmpDir.fileSystem.close()
-    }
-}
-
-fun extractResources(jar: Path, out: Path, postProcessors: List<PostProcessor>) = supplyAsync(TaskType.EXTRACT_RESOURCE) {
-    getJarFileSystem(jar).use { fs ->
-        val root = fs.getPath("/")
-        Files.walk(root).forEach { path ->
-            if (Files.isDirectory(path) || path.fileName.toString().endsWith(".class")) return@forEach
-            val relative = root.relativize(path)
-            val (outRelative, content) = postProcessFile(path, relative, postProcessors)
-            val fileOut = out.resolve(outRelative.toString())
-            Files.createDirectories(fileOut.parent)
-            if (content == null) {
-                copyCached(path, fileOut, RESOURCE_CACHE_DIR)
-            } else {
-                writeCached(fileOut, content, RESOURCE_CACHE_DIR)
+fun postProcessSources(version: String, srcTmpDir: Path, srcDir: Path, postProcessors: List<PostProcessor>) =
+    supplyAsync(TaskType.POST_PROCESS) {
+        Timer(version, "postProcessSources", mapOf("srcDir" to srcDir.toString())).use {
+            if (Files.exists(srcDir)) rmrf(srcDir)
+            Files.createDirectories(srcDir)
+            Files.walk(srcTmpDir).forEach { path ->
+                if (Files.isDirectory(path)) return@forEach
+                val relative = srcTmpDir.relativize(path)
+                val (outRelative, content) = postProcessFile(path, relative, postProcessors)
+                val fileOut = srcDir.resolve(outRelative.toString())
+                Files.createDirectories(fileOut.parent)
+                if (content != null) {
+                    Files.write(fileOut, content)
+                } else {
+                    Files.copy(path, fileOut)
+                }
+            }
+            if (srcTmpDir.fileSystem != FileSystems.getDefault()) {
+                srcTmpDir.fileSystem.close()
             }
         }
     }
-}
+
+fun extractResources(version: String, jar: Path, out: Path, postProcessors: List<PostProcessor>) =
+    supplyAsync(TaskType.EXTRACT_RESOURCE) {
+        Timer(version, "extractResources", mapOf("jar" to jar.toString(), "out" to out.toString())).use {
+            getJarFileSystem(jar).use { fs ->
+                val root = fs.getPath("/")
+                Files.walk(root).forEach { path ->
+                    if (Files.isDirectory(path) || path.fileName.toString().endsWith(".class")) return@forEach
+                    val relative = root.relativize(path)
+                    val (outRelative, content) = postProcessFile(path, relative, postProcessors)
+                    val fileOut = out.resolve(outRelative.toString())
+                    Files.createDirectories(fileOut.parent)
+                    if (content == null) {
+                        copyCached(path, fileOut, RESOURCE_CACHE_DIR)
+                    } else {
+                        writeCached(fileOut, content, RESOURCE_CACHE_DIR)
+                    }
+                }
+            }
+        }
+    }
 
 fun convertStructure(tag: Tag) {
     if (tag !is CompoundTag) return
@@ -338,14 +347,15 @@ fun getMavenArtifacts(mvnArtifacts: List<MavenArtifact>): CompletableFuture<List
 
 private object Dummy
 
-fun extractGradleAndExtraSources(version: VersionInfo, out: Path): CompletableFuture<Unit> = supplyAsync(TaskType.EXTRACT_RESOURCE) {
-    useResourceFileSystem(Dummy::class.java) {
-        copyCached(it.resolve("gradle_env"), out, RESOURCE_CACHE_DIR)
-        copyCached(it.resolve("extra_src"), out.resolve("src/main/java"), RESOURCE_CACHE_DIR)
+fun extractGradleAndExtraSources(version: VersionInfo, out: Path): CompletableFuture<Unit> =
+    supplyAsync(TaskType.EXTRACT_RESOURCE) {
+        useResourceFileSystem(Dummy::class.java) {
+            copyCached(it.resolve("gradle_env"), out, RESOURCE_CACHE_DIR)
+            copyCached(it.resolve("extra_src"), out.resolve("src/main/java"), RESOURCE_CACHE_DIR)
+        }
+    }.thenCompose {
+        generateGradleBuild(version, out)
     }
-}.thenCompose {
-    generateGradleBuild(version, out)
-}
 
 fun getMonumentClassRoot(): Path? {
     val dummyClass = Dummy::class.java
@@ -358,6 +368,7 @@ fun getMonumentClassRoot(): Path? {
             val p = Paths.get(uri).toString()
             Paths.get(p.substring(0, p.indexOf(dummyFileName)))
         }
+
         "jar" -> Paths.get(uri.schemeSpecificPart.substring(5, uri.schemeSpecificPart.indexOf('!')))
         else -> null
     }
