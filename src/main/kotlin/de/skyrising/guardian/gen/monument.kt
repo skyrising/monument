@@ -43,7 +43,7 @@ val DEFAULT_DECOMPILER_MAP = mapOf<Decompiler, List<MavenArtifact>>(
     Decompiler.FORGEFLOWER to listOf(MavenArtifact(FORGE_MAVEN, ArtifactSpec("net.minecraftforge", "forgeflower", "1.5.498.5"))),
     Decompiler.FABRIFLOWER to listOf(MavenArtifact(FABRIC_MAVEN, ArtifactSpec("net.fabricmc", "fabric-fernflower", "1.4.0"))),
     Decompiler.QUILTFLOWER to listOf(MavenArtifact(QUILT_MAVEN, ArtifactSpec("org.quiltmc", "quiltflower", "1.9.0"))),
-    Decompiler.VINEFLOWER to listOf(MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.vineflower", "vineflower", "1.9.3"))),
+    Decompiler.VINEFLOWER to listOf(MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.vineflower", "vineflower", "1.10.1"))),
     Decompiler.PROCYON to listOf(
         MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.bitbucket.mstrobel", "procyon-core", "0.5.36")),
         MavenArtifact(MAVEN_CENTRAL, ArtifactSpec("org.bitbucket.mstrobel", "procyon-compilertools", "0.5.36"))
