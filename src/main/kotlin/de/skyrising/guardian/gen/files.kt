@@ -142,9 +142,11 @@ interface PostProcessor {
 }
 
 val STRUCTURE_PROCESSOR = object : PostProcessor {
-    private val structurePath = Paths.get("data", "minecraft", "structures")
+    private val structurePath = Paths.get("data", "minecraft", "structure")
+    private val structuresPath = Paths.get("data", "minecraft", "structures")
 
-    override fun matches(path: Path) = path.startsWith(structurePath.toString()) && path.fileName.toString().endsWith(".nbt")
+    override fun matches(path: Path) =
+        (path.startsWith(structurePath.toString()) || path.startsWith(structuresPath.toString())) && path.fileName.toString().endsWith(".nbt")
 
     override fun process(path: Path, content: ByteArray): Pair<Path, ByteArray> {
         val nbtName = path.fileName.toString()
