@@ -147,7 +147,7 @@ private fun getBaseUrl(cls: Class<*>): URL {
     if (url.startsWith("jar:")) {
         return URL(url.substring(4, url.indexOf("!/")))
     }
-    return URL(url.substring(0, url.lastIndexOf(path)))
+    return URL(url.take(url.lastIndexOf(path)))
 }
 
 interface DecompileTask {
@@ -157,21 +157,21 @@ interface DecompileTask {
 @Suppress("unused")
 open class FernflowerDecompileTask : DecompileTask {
     protected fun getArgs(jar: Path, outputDir: Path, cp: List<Path>?, defaults: Map<String, Any>): Array<String> {
-        val args = mutableListOf("-${IFernflowerPreferences.INDENT_STRING}=    ")
+        val args = mutableListOf("-ind=    ")
         if ("jrt" in defaults) {
             args.add("-jrt=1")
         } else if (IFernflowerPreferences.WARN_INCONSISTENT_INNER_CLASSES in defaults) {
             // QuiltFlower has fast iec
-            args.add("-${IFernflowerPreferences.INCLUDE_ENTIRE_CLASSPATH}=1")
+            args.add("-iec=1")
         }
-        args.add("-${IFernflowerPreferences.REMOVE_SYNTHETIC}=1")
-        args.add("-${IFernflowerPreferences.DECOMPILE_GENERIC_SIGNATURES}=1")
+        args.add("-rsy=1")
+        args.add("-dgs=1")
         if (IFernflowerPreferences.THREADS in defaults) {
             val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
             val maxTotalThreads = maxOf(executor.parallelism - 4, 1)
             val decompilers = executor.decompileParallelism
             val threads = maxOf((maxTotalThreads + decompilers - 1) / decompilers, 1)
-            args.add("-${IFernflowerPreferences.THREADS}=$threads")
+            args.add("-thr=$threads")
         }
         if ("pam" in defaults) {
             args.add("-pam=1")

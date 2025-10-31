@@ -169,10 +169,7 @@ data class ByteArrayTag(val value: ByteArray) : Tag() {
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as ByteArrayTag
-        if (!value.contentEquals(other.value)) return false
-        return true
+        return javaClass == other?.javaClass && value.contentEquals((other as ByteArrayTag).value)
     }
 
     override fun hashCode(): Int = value.contentHashCode()
@@ -262,7 +259,7 @@ data class ListTag<T : Tag>(val value: MutableList<T>) : Tag(), MutableList<T> b
             if (!first) sb.append(',')
             if (indent) {
                 sb.append('\n')
-                for (i in 0 .. depth) sb.append(indentString)
+                repeat(depth) { sb.append(indentString) }
             } else if (!first) {
                 sb.append(' ')
             }
@@ -272,7 +269,7 @@ data class ListTag<T : Tag>(val value: MutableList<T>) : Tag(), MutableList<T> b
         path.removeLast()
         if (indent) {
             sb.append('\n')
-            for (i in 0 until depth) sb.append("    ")
+            repeat(depth) { sb.append(indentString) }
         }
         sb.append(']')
     }
@@ -282,7 +279,7 @@ data class ListTag<T : Tag>(val value: MutableList<T>) : Tag(), MutableList<T> b
             val reader = getReader<T>(din.readByte().toInt())
             val size = din.readInt()
             val value = ArrayList<T>(size)
-            for (i in 0 until size) {
+            repeat(size) {
                 value.add(reader(din))
             }
             return ListTag(value)
@@ -315,7 +312,7 @@ data class CompoundTag(val value: MutableMap<String, Tag>) : Tag(), MutableMap<S
             if (!first) sb.append(',')
             if (indent) {
                 sb.append('\n')
-                for (i in 0 .. depth) sb.append("    ")
+                repeat(depth) { sb.append(indentString) }
             } else if (!first) {
                 sb.append(' ')
             }
@@ -333,7 +330,7 @@ data class CompoundTag(val value: MutableMap<String, Tag>) : Tag(), MutableMap<S
         path.removeLast()
         if (indent) {
             sb.append('\n')
-            for (i in 0 until depth) sb.append("    ")
+            repeat(depth) { sb.append(indentString) }
         }
         sb.append('}')
     }
@@ -378,10 +375,7 @@ data class IntArrayTag(val value: IntArray) : Tag() {
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as IntArrayTag
-        if (!value.contentEquals(other.value)) return false
-        return true
+        return javaClass == other?.javaClass && value.contentEquals((other as IntArrayTag).value)
     }
 
     override fun hashCode() = value.contentHashCode()
@@ -412,10 +406,7 @@ data class LongArrayTag(val value: LongArray) : Tag() {
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as LongArrayTag
-        if (!value.contentEquals(other.value)) return false
-        return true
+        return javaClass == other?.javaClass && value.contentEquals((other as LongArrayTag).value)
     }
 
     override fun hashCode() = value.contentHashCode()

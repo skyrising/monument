@@ -25,6 +25,9 @@ data class VersionInfo(val id: String, val type: String, val url: URI, val time:
         if (timeCompare != 0) return timeCompare
         return id.compareTo(other.id)
     }
+
+    override fun hashCode() = Objects.hash(id, type, releaseTime, time)
+    override fun equals(other: Any?) = other is VersionInfo && id == other.id && type == other.type && releaseTime == other.releaseTime && time == other.time
     override fun toString() = id
 }
 

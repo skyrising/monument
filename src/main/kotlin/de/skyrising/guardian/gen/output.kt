@@ -12,10 +12,10 @@ private val outputStreams = ConcurrentHashMap<String, PrintStream>()
 val persistentOutputs = listOf("sysout", "syserr", "progress")
 val outputsByThread = linkedMapOf<Thread, String>()
 private var outputEnabled = false
-val sysOut = System.out
+val sysOut: PrintStream = System.out
 private val sysErr = System.err
-private val outputToKey = ConcurrentHashMap<ThreadGroup, String?>()
-private val outputListener = ConcurrentHashMap<ThreadGroup, ((String) -> Unit)?>()
+private val outputToKey = ConcurrentHashMap<ThreadGroup, String>()
+private val outputListener = ConcurrentHashMap<ThreadGroup, ((String) -> Unit)>()
 
 fun getOutputKey(thread: Thread = Thread.currentThread()): String {
     return outputToKey[thread.threadGroup] ?: thread.threadGroup.name

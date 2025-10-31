@@ -26,7 +26,7 @@ open class MappingTree(val namespaces: Array<String>) {
     fun mapType(type: Type, index: Int): Type = when(type.sort) {
         Type.ARRAY -> {
             val remappedDesc = StringBuilder()
-            for (i in 0 until type.dimensions) remappedDesc.append('[')
+            repeat(type.dimensions) { remappedDesc.append('[') }
             remappedDesc.append(mapType(type.elementType, index).descriptor)
             Type.getType(remappedDesc.toString())
         }

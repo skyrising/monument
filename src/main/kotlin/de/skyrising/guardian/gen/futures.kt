@@ -42,8 +42,8 @@ interface CustomExecutorService : ExecutorService {
                 if (!f.isDone) {
                     try {
                         f.get()
-                    } catch (ignore: CancellationException) {
-                    } catch (ignore: ExecutionException) {
+                    } catch (_: CancellationException) {
+                    } catch (_: ExecutionException) {
                     }
                 }
                 i++
@@ -103,7 +103,7 @@ fun <K, V> deduplicate(map: MutableMap<K, CompletableFuture<V>>, key: K, future:
 }
 
 object CustomThreadFactory : ThreadFactory {
-    val group = Thread.currentThread().threadGroup
+    val group: ThreadGroup = Thread.currentThread().threadGroup
     val subGroupCount = AtomicInteger()
 
     override fun newThread(r: Runnable): Thread {
@@ -160,10 +160,10 @@ class CustomThreadPoolExecutor(override val parallelism: Int, initialDecompilePa
             println("Decompile parallelism is now $value")
             field = value
         }
-    private val semaphores = Array(TaskType.values().size) { Semaphore(maxTasks(TaskType.values()[it])) }
+    private val semaphores = Array(TaskType.entries.size) { Semaphore(maxTasks(TaskType.entries[it])) }
     private val decompileSemaphore = Semaphore(decompileParallelism)
     private val workers = Array(parallelism) { Worker(it, threadFactory) }
-    private val runnableTasks = Array(TaskType.values().size) { PriorityBlockingQueue<Task>() }
+    private val runnableTasks = Array(TaskType.entries.size) { PriorityBlockingQueue<Task>() }
     private val scheduledTasks = ConcurrentHashMap.newKeySet<Task>()
     private val runningTasks = ConcurrentHashMap.newKeySet<Task>()
     private val terminated = Object()
@@ -194,7 +194,7 @@ class CustomThreadPoolExecutor(override val parallelism: Int, initialDecompilePa
             while (running) {
                 val task = try {
                     waitForNextTask()
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     continue
                 }
                 try {
@@ -219,7 +219,7 @@ class CustomThreadPoolExecutor(override val parallelism: Int, initialDecompilePa
         private fun waitForNextTask(): Task {
             if (DEBUG) output("scheduler", "Worker $id is waiting for task")
             while (true) {
-                for (type in TaskType.values()) {
+                for (type in TaskType.entries) {
                     try {
                         val semaphore = semaphores[type.ordinal]
                         if (semaphore.tryAcquire()) {
@@ -290,7 +290,7 @@ class CustomThreadPoolExecutor(override val parallelism: Int, initialDecompilePa
                 terminated.wait(unit.toMillis(timeout), (unit.toNanos(timeout) % 1000000L).toInt())
             }
             true
-        } catch (e: InterruptedException) {
+        } catch (_: InterruptedException) {
             false
         }
     }

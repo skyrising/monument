@@ -1,47 +1,42 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
-    kotlin("jvm") version "1.5.31"
-    id("com.github.johnrengelman.shadow") version "5.2.0"
+    alias(libs.plugins.jvm)
+    alias(libs.plugins.shadow)
     application
 }
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(11))
+        languageVersion.set(JavaLanguageVersion.of(libs.versions.java.get()))
+    }
+}
+
+tasks.withType<KotlinCompile> {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.fromTarget(libs.versions.java.get()))
     }
 }
 
 repositories {
     mavenCentral()
     maven("https://maven.fabricmc.net/") { name = "FabricMC" }
-    maven("https://maven.quiltmc.org/repository/release/") { name = "QuiltMC" }
 }
 
 dependencies {
-    implementation(platform("org.jetbrains.kotlin:kotlin-bom"))
-    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
-    testImplementation("org.jetbrains.kotlin:kotlin-test")
-    testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
-    implementation("com.google.code.gson:gson:2.8.6")
-    implementation("net.fabricmc:stitch:0.6.1")
-    implementation("org.tomlj:tomlj:1.0.0")
-    implementation("org.ow2.asm:asm:9.7")
-    implementation("org.ow2.asm:asm-tree:9.7")
-    implementation("org.ow2.asm:asm-commons:9.7")
-    implementation("net.sf.jopt-simple:jopt-simple:6.0-alpha-3")
-    implementation("com.google.jimfs:jimfs:1.2")
-    implementation("org.jline:jline-terminal:3.21.0")
+    testImplementation(kotlin("test"))
+    implementation(libs.gson)
+    implementation(libs.stitch)
+    implementation(libs.tomlj)
+    implementation(libs.bundles.asm)
+    implementation(libs.jopt.simple)
+    implementation(libs.jimfs)
+    implementation(libs.jline.terminal)
 
-    compileOnly("org.bitbucket.mstrobel:procyon-compilertools:0.5.36")
-    compileOnly("org.vineflower:vineflower:1.9.3")
-    compileOnly("org.benf:cfr:0.151")
+    compileOnly(libs.bundles.decompilers)
 }
 
 application {
-    mainClassName = "de.skyrising.guardian.gen.MonumentKt"
-}
-
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java).all {
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+    mainClass.set("de.skyrising.guardian.gen.MonumentKt")
 }

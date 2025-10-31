@@ -407,14 +407,14 @@ class ClassMerger {
         private const val ITF_LIST_DESCRIPTOR = "Lnet/fabricmc/api/EnvironmentInterfaces;"
         private const val SIDED_DESCRIPTOR = "Lnet/fabricmc/api/Environment;"
         private fun visitSideAnnotation(av: AnnotationVisitor, side: String) {
-            av.visitEnum("value", SIDE_DESCRIPTOR, side.toUpperCase(Locale.ROOT))
+            av.visitEnum("value", SIDE_DESCRIPTOR, side.uppercase(Locale.ROOT))
             av.visitEnd()
         }
 
         private fun visitItfAnnotation(av: AnnotationVisitor, side: String, itfDescriptors: List<String>) {
             for (itf in itfDescriptors) {
                 val avItf = av.visitAnnotation(null, ITF_DESCRIPTOR)
-                avItf.visitEnum("value", SIDE_DESCRIPTOR, side.toUpperCase(Locale.ROOT))
+                avItf.visitEnum("value", SIDE_DESCRIPTOR, side.uppercase(Locale.ROOT))
                 avItf.visit("itf", Type.getType("L$itf;"))
                 avItf.visitEnd()
             }

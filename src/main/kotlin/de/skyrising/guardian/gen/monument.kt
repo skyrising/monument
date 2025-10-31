@@ -8,6 +8,7 @@ import jdk.jfr.Recording
 import jdk.jfr.RecordingState
 import joptsimple.OptionException
 import joptsimple.OptionParser
+import org.jline.terminal.Terminal
 import org.jline.terminal.TerminalBuilder
 import org.tomlj.Toml
 import java.io.IOException
@@ -61,7 +62,7 @@ val JARS_DIR: Path = CACHE_DIR.resolve("jars")
 
 private val UNICODE_PROGRESS_BLOCKS = charArrayOf(' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█')
 
-val TERMINAL = TerminalBuilder.terminal()
+val TERMINAL: Terminal = TerminalBuilder.terminal()
 
 val OPENED_LIBRARIES = ConcurrentHashMap<Path, FileSystem>()
 
@@ -214,12 +215,13 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
         ?: throw IllegalStateException("No head version found")
     println("Finding path from ${base ?: "the beginning"} to $head")
     val branchVersions = Timer("", "findPredecessors").use {
+        val hasMappings = mutableMapOf<VersionInfo, Boolean>()
         findPredecessors(head, base) {
-            branchConfig.filter(it) && (
-                    immediate { mappings.supportsVersion(it, MappingTarget.MERGED) }
-                            || immediate { mappings.supportsVersion(it, MappingTarget.CLIENT) }
-                            || immediate { mappings.supportsVersion(it, MappingTarget.SERVER) }
-                    )
+            branchConfig.filter(it) && hasMappings.computeIfAbsent(it) { v ->
+                    immediate { mappings.supportsVersion(v, MappingTarget.MERGED) }
+                    || immediate { mappings.supportsVersion(v, MappingTarget.CLIENT) }
+                    || immediate { mappings.supportsVersion(v, MappingTarget.SERVER) }
+            }
         }
     }
     if (branchVersions.isEmpty()) {
@@ -301,7 +303,7 @@ fun update(branch: String, action: String, recommitFrom: String?, manifest: Path
             if (full) {
                 for (line in listedOutputs) {
                     lines++
-                    output.append('\n').append(line.substring(0, minOf(line.length, terminalWidth)))
+                    output.append('\n').append(line.take(minOf(line.length, terminalWidth)))
                 }
             }
             sysOut.println(output)

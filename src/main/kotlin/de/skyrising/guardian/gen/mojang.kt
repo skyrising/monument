@@ -19,7 +19,7 @@ private fun cachedFile(url: URI): Path? {
     if (url.host != "launchermeta.mojang.com" || !url.path.startsWith("/v1/packages/")) return null
     val path = url.path.substring("/v1/packages/".length)
     val hash = path.substringBefore('/')
-    return MOJANG_CACHE_DIR.resolve(hash.substring(0, 2)).resolve(hash.substring(2)).resolve(path.substringAfter('/'))
+    return MOJANG_CACHE_DIR.resolve(hash.take(2)).resolve(hash.substring(2)).resolve(path.substringAfter('/'))
 }
 
 private fun getOrFetch(url: URI): CompletableFuture<Path> {

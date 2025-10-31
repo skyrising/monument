@@ -36,7 +36,7 @@ fun createBranch(branch: String, config: GitConfig, history: List<CommitTemplate
         immediate { git(TEMP_REPO_DIR, "checkout", branch) }
         for (line in immediate { gitLines(TEMP_REPO_DIR, "log", "--format=%H%T%s", "--reverse") }) {
             val message = line.substring(80)
-            commits[message] = line.substring(0, 40)
+            commits[message] = line.take(40)
             trees[message] = line.substring(40, 80)
         }
         Files.list(TEMP_REPO_DIR).forEach {

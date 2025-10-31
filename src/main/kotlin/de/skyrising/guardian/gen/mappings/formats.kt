@@ -25,7 +25,7 @@ abstract class LineBasedMappingFormat<T> : MappingsFormat {
     override fun parse(reader: BufferedReader) = parse(null, reader)
 
     override fun write(mappings: MappingTree, writer: Appendable) {
-        getLines(mappings).forEach { writer.appendln(it) }
+        getLines(mappings).forEach { writer.appendLine(it) }
     }
 
     abstract fun readLine(state: T?, line: String): T

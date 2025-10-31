@@ -52,7 +52,7 @@ object ProguardMappings : LineBasedMappingFormat<Pair<MappingTree, ClassMapping?
     private fun parseClass(line: String): ClassMapping {
         val arrow = line.indexOf(" -> ")
         if (arrow < 0 || line[line.lastIndex] != ':') throw IllegalArgumentException("Expected '->' and ':' for class mapping")
-        val from = line.substring(0, arrow).toSlashed()
+        val from = line.take(arrow).toSlashed()
         val to = line.substring(arrow + 4, line.lastIndex).toSlashed()
         return ClassMapping(arrayOf(from, to))
     }
@@ -127,7 +127,7 @@ object ProguardMappings : LineBasedMappingFormat<Pair<MappingTree, ClassMapping?
     }
 
     private fun getTypeDescriptor(type: String): String = when {
-        type.endsWith("[]") -> "[" + getTypeDescriptor(type.substring(0, type.length - 2))
+        type.endsWith("[]") -> "[" + getTypeDescriptor(type.dropLast(2))
         type in PRIMITIVE_DESCRIPTORS -> PRIMITIVE_DESCRIPTORS[type]!!
         else -> "L" + type.toSlashed() + ";"
     }

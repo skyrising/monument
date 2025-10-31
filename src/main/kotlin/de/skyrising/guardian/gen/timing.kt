@@ -79,7 +79,7 @@ fun dumpTimers(out: PrintStream) {
 }
 
 object TraceEvents {
-    private val GZ = true
+    private const val GZ = true
     private lateinit var writer: Writer
     private var eventCount = 0
     private val threadSeen = ThreadLocal.withInitial { false }
@@ -112,7 +112,7 @@ object TraceEvents {
                     TraceEvent.Counter("Heap", args = gcInfo.memoryUsageAfterGc.mapValues { (_, v) -> v.used })
                 }, null, null)
             }
-        } catch (ignored: ClassNotFoundException) {}
+        } catch (_: ClassNotFoundException) {}
     }
 
     @Synchronized
@@ -137,7 +137,7 @@ object TraceEvents {
 
 val PID = ProcessHandle.current().pid()
 
-fun gettid() = Thread.currentThread().id.toInt()
+fun gettid() = Thread.currentThread().threadId().toInt()
 
 sealed interface TraceEvent {
     val ph: Char
