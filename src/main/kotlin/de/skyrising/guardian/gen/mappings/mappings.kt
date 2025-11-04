@@ -13,6 +13,8 @@ val JARS_MAPPED_DIR: Path = JARS_DIR.resolve("mapped")
 interface MappingProvider {
     val name: String
     val format: MappingsParser
+    val supportsUnobfuscated get() = false
+
     fun getMappings(version: VersionInfo, mappings: String?, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<MappingTree?>
     fun supportsVersion(version: VersionInfo, target: MappingTarget, cache: Path = CACHE_DIR.resolve("mappings")): CompletableFuture<Boolean> {
         return getLatestMappings(version, target, cache).thenApply { it != null }
@@ -25,13 +27,7 @@ interface MappingProvider {
         }
     }
     companion object {
-        val MOJANG = object : CommonMappingProvider("mojang", ProguardMappings, "txt", "official") {
-            override fun getUrl(cache: Path, version: VersionInfo, mappings: String?, target: MappingTarget): CompletableFuture<URI?> =
-                if (target == MappingTarget.MERGED) CompletableFuture.completedFuture(null)
-                else getMojangVersionManifest(version).thenApply { manifest ->
-                    manifest["downloads"]?.asJsonObject?.get(target.id + "_mappings")?.asJsonObject?.get("url")?.asString?.let { URI(it) }
-                }
-        }
+        val MOJANG = MojangMappingProvider("mojang")
         val FABRIC_INTERMEDIARY = IntermediaryMappingProvider("fabric", URI("https://meta.fabricmc.net/v2/"), URI("https://maven.fabricmc.net/"))
         val LEGACY_INTERMEDIARY = IntermediaryMappingProvider("legacy", URI("https://meta.legacyfabric.net/v2/"), URI("https://maven.legacyfabric.net/"))
         val QUILT_INTERMEDIARY = IntermediaryMappingProvider("quilt", URI("https://meta.quiltmc.org/v3/"), URI("https://maven.quiltmc.org/repository/release/"))
@@ -66,6 +62,18 @@ abstract class CommonMappingProvider(override val name: String, override val for
     }
 
     override fun toString() = "${javaClass.simpleName}($name)"
+}
+
+class MojangMappingProvider(name: String) : CommonMappingProvider(name, ProguardMappings, "txt", "official") {
+    override val supportsUnobfuscated get() = true
+    override fun supportsVersion(version: VersionInfo, target: MappingTarget, cache: Path): CompletableFuture<Boolean> =
+        if (version.unobfuscated) CompletableFuture.completedFuture(target != MappingTarget.MERGED)
+        else super.supportsVersion(version, target, cache)
+    override fun getUrl(cache: Path, version: VersionInfo, mappings: String?, target: MappingTarget): CompletableFuture<URI?> =
+        if (target == MappingTarget.MERGED) CompletableFuture.completedFuture(null)
+        else getMojangVersionManifest(version).thenApply { manifest ->
+            manifest["downloads"]?.asJsonObject?.get(target.id + "_mappings")?.asJsonObject?.get("url")?.asString?.let { URI(it) }
+        }
 }
 
 abstract class JarMappingProvider(override val name: String, override val format: MappingsParser) : CommonMappingProvider(name, format, "jar") {

@@ -349,7 +349,9 @@ fun getMappedMergedJar(version: VersionInfo, provider: MappingProvider): Complet
     val jar = getJar(version, MappingTarget.MERGED)
     val mappings = getMappings(provider, version, MappingTarget.MERGED)
     return CompletableFuture.allOf(jar, mappings).thenCompose {
-        val m = mappings.get() ?: throw IllegalStateException("No mappings")
+        val m = mappings.get()
+        if (m == null && provider.supportsUnobfuscated && version.unobfuscated) return@thenCompose jar
+        if (m == null) throw IllegalStateException("No mappings")
         return@thenCompose mapJar(version.id, jar.get(), m, provider.name)
     }
 }

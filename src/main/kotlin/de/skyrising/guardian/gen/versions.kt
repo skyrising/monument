@@ -13,7 +13,7 @@ interface DagNode<T : DagNode<T>> {
     val parents: List<T>
 }
 
-data class VersionInfo(val id: String, val type: String, val url: URI, val time: ZonedDateTime, val releaseTime: ZonedDateTime, override val parents: MutableList<VersionInfo> = mutableListOf()) : Comparable<VersionInfo?>, DagNode<VersionInfo> {
+data class VersionInfo(val id: String, val type: String, val url: URI, val time: ZonedDateTime, val releaseTime: ZonedDateTime, var unobfuscated: Boolean, override val parents: MutableList<VersionInfo> = mutableListOf()) : Comparable<VersionInfo?>, DagNode<VersionInfo> {
     override fun compareTo(other: VersionInfo?): Int {
         if (other == null) return 1
         val releaseTimeCompare = releaseTime.compareTo(other.releaseTime)

@@ -16,6 +16,7 @@ import java.nio.file.Path
 import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.extension
 
 interface Decompiler {
     val name: String
@@ -192,7 +193,7 @@ open class FernflowerDecompileTask : DecompileTask {
         val srcOutput = outDir.resolve("src")
         Timer(version, "decompile.extractClasses").use {
             getJarFileSystem(jar).use {
-                copy(it.getPath("/"), clsOutput)
+                copy(it.getPath("/"), clsOutput) { p -> p.extension == "class" }
             }
             Files.createDirectories(srcOutput)
         }

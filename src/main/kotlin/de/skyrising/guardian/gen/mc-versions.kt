@@ -24,10 +24,11 @@ fun getMcVersions(): CompletableFuture<Map<String, VersionInfo>> =
 private fun parseMcVersions(): Map<String, VersionInfo> {
     val map = parseVersionManifest(GSON.fromJson(Files.newBufferedReader(MC_VERSIONS_DATA_DIR.resolve("version_manifest.json")))).mapValues {
         val v = it.value
-        VersionInfo(v.id, v.type, MC_VERSIONS_DATA_DIR.resolve(v.url.toString()).toUri(), v.time, v.releaseTime)
+        VersionInfo(v.id, v.type, MC_VERSIONS_DATA_DIR.resolve(v.url.toString()).toUri(), v.time, v.releaseTime, false)
     }
     for (version in map.values) {
         val versionDetails = GSON.fromJson<JsonObject>(Files.newBufferedReader(MC_VERSIONS_DATA_DIR.resolve("version").resolve(version.id + ".json")))
+        version.unobfuscated = versionDetails["unobfuscated"]?.asBoolean ?: false
         for (prevId in versionDetails["previous"]?.asJsonArray ?: JsonArray()) {
             val prev = map[prevId.asString]
             if (prev != null) {

@@ -75,7 +75,7 @@ fun rmrf(path: Path) {
     })
 }
 
-fun copy(path: Path, to: Path, vararg options: CopyOption) {
+fun copy(path: Path, to: Path, vararg options: CopyOption, filter: (Path) -> Boolean = { true }) {
     Files.walkFileTree(path, object : SimpleFileVisitor<Path>() {
         override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
             val dest = to.resolve(path.relativize(dir).toString())
@@ -84,8 +84,11 @@ fun copy(path: Path, to: Path, vararg options: CopyOption) {
         }
 
         override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-            val dest = to.resolve(path.relativize(file).toString())
-            Files.copy(file, dest, *options)
+            val relative = path.relativize(file)
+            if (filter(relative)) {
+                val dest = to.resolve(relative.toString())
+                Files.copy(file, dest, *options)
+            }
             return FileVisitResult.CONTINUE
         }
     })
