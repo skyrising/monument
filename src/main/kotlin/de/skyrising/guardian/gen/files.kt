@@ -313,7 +313,7 @@ fun tagToBlockStateString(tag: CompoundTag): String {
     return sb.append('}').toString()
 }
 
-fun useResourceFileSystem(cls: Class<*>, fn: (Path) -> Unit) {
+fun useResourceFileSystem(cls: Class<*> = Dummy::class.java, fn: (Path) -> Unit) {
     val root = cls.getResource("/.resourceroot") ?: throw IllegalStateException("Could not find resource root")
     val uri = root.toURI()
     when (uri.scheme) {
@@ -346,16 +346,6 @@ fun getMavenArtifacts(mvnArtifacts: List<MavenArtifact>): CompletableFuture<List
 }
 
 private object Dummy
-
-fun extractGradleAndExtraSources(version: VersionInfo, out: Path): CompletableFuture<Unit> =
-    supplyAsync(TaskType.EXTRACT_RESOURCE) {
-        useResourceFileSystem(Dummy::class.java) {
-            copyCached(it.resolve("gradle_env"), out, RESOURCE_CACHE_DIR)
-            copyCached(it.resolve("extra_src"), out.resolve("src/main/java"), RESOURCE_CACHE_DIR)
-        }
-    }.thenCompose {
-        generateGradleBuild(version, out)
-    }
 
 fun getMonumentClassRoot(): Path? {
     val dummyClass = Dummy::class.java
