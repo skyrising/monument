@@ -225,6 +225,25 @@ data class StringTag(val value: String) : Tag() {
     }
 }
 
+fun <T> appendChildren(sb: StringBuilder, children: Collection<T>, depth: Int, indent: Boolean, indentString: String, process: (T) -> Unit) {
+    var first = true
+    for (e in children) {
+        if (!first) sb.append(',')
+        if (indent) {
+            sb.append('\n')
+            repeat(depth + 1) { sb.append(indentString) }
+        } else if (!first) {
+            sb.append(' ')
+        }
+        first = false
+        process(e)
+    }
+    if (indent) {
+        sb.append('\n')
+        repeat(depth) { sb.append(indentString) }
+    }
+}
+
 data class ListTag<T : Tag>(val value: MutableList<T>) : Tag(), MutableList<T> by value {
     init {
         verify()
@@ -254,23 +273,10 @@ data class ListTag<T : Tag>(val value: MutableList<T>) : Tag(), MutableList<T> b
         sb.append('[')
         path.addLast("[]")
         val indent = indentString.isNotEmpty() && !NO_INDENT.contains(path)
-        var first = true
-        for (e in value) {
-            if (!first) sb.append(',')
-            if (indent) {
-                sb.append('\n')
-                repeat(depth) { sb.append(indentString) }
-            } else if (!first) {
-                sb.append(' ')
-            }
-            first = false
-            e.toString(sb, depth + 1, path, if (indent) indentString else "")
+        appendChildren(sb, value, depth, indent, indentString) {
+            it.toString(sb, depth + 1, path, if (indent) indentString else "")
         }
         path.removeLast()
-        if (indent) {
-            sb.append('\n')
-            repeat(depth) { sb.append(indentString) }
-        }
         sb.append(']')
     }
 
@@ -306,17 +312,7 @@ data class CompoundTag(val value: MutableMap<String, Tag>) : Tag(), MutableMap<S
         sb.append('{')
         path.addLast("{}")
         val indent = indentString.isNotEmpty() && !NO_INDENT.contains(path)
-        var first = true
-        for (k in getOrderedKeys(path)) {
-            val v = value[k]!!
-            if (!first) sb.append(',')
-            if (indent) {
-                sb.append('\n')
-                repeat(depth) { sb.append(indentString) }
-            } else if (!first) {
-                sb.append(' ')
-            }
-            first = false
+        appendChildren(sb, getOrderedKeys(path), depth, indent, indentString) { k ->
             if (StringTag.SIMPLE.matches(k)) {
                 sb.append(k)
             } else {
@@ -324,14 +320,10 @@ data class CompoundTag(val value: MutableMap<String, Tag>) : Tag(), MutableMap<S
             }
             sb.append(": ")
             path.addLast(k)
-            v.toString(sb, depth + 1, path, if (indent) indentString else "")
+            value[k]!!.toString(sb, depth + 1, path, if (indent) indentString else "")
             path.removeLast()
         }
         path.removeLast()
-        if (indent) {
-            sb.append('\n')
-            repeat(depth) { sb.append(indentString) }
-        }
         sb.append('}')
     }
 
