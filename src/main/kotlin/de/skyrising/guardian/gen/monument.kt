@@ -82,6 +82,7 @@ fun main(args: Array<String>) {
     }
     val parser = OptionParser()
     val helpArg = parser.accepts("help").forHelp()
+    val versionArg = parser.accepts("version")
     val nonOptionsArg = parser.nonOptions()
     val recommitArg = parser.acceptsAll(listOf("r", "recommit"), "Recommit more of the history than necessary").withOptionalArg().ofType(String::class.java)
     val manifestArg = parser.acceptsAll(listOf("m", "manifest"), "Specify a custom version manifest file").withOptionalArg().ofType(String::class.java)
@@ -98,6 +99,10 @@ fun main(args: Array<String>) {
         val options = parser.parse(*args)
         if (options.has(helpArg)) {
             printUsage()
+            return
+        }
+        if (options.has(versionArg)) {
+            println(MONUMENT_VERSION)
             return
         }
         if (options.has(recommitArg)) {

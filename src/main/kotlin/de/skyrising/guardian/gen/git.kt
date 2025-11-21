@@ -6,6 +6,11 @@ import java.nio.file.Paths
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.CompletableFuture
+import java.util.jar.JarInputStream
+import java.util.jar.Manifest
+import kotlin.io.path.inputStream
+import kotlin.io.path.isDirectory
+import kotlin.io.path.isRegularFile
 
 data class CommitTemplate(val version: VersionInfo, val source: Path, override val parents: List<CommitTemplate>) : DagNode<CommitTemplate> {
     override fun toString() = version.toString()
@@ -176,15 +181,41 @@ fun gitCommitTree(
     }
 }
 
-fun getMonumentVersion(): String {
-    return try {
-        var path = getMonumentClassRoot() ?: Paths.get(".")
-        if (!Files.isDirectory(path)) path = path.parent
-        val (code, p) = immediate { run(path, null, listOf("git", "describe", "--always", "--tags", "--dirty")) }
-        if (code != 0) return "unknown"
-        p.inputStream.bufferedReader().readText().trim()
-    } catch (e: Exception) {
-        e.printStackTrace()
-        "unknown"
+data class MonumentVersion(val version: String, val commit: String?) {
+    override fun toString() = if (commit == null) version else "$version (${commit.take(7)})"
+
+    companion object {
+        fun fromManifest(manifest: Manifest): MonumentVersion? {
+            val version = manifest.mainAttributes.getValue("Implementation-Version") ?: return null
+            return MonumentVersion(version, manifest.mainAttributes.getValue("Git-Commit"))
+        }
+
+        fun fromGit(path: Path): MonumentVersion? {
+            return try {
+                val (code, p) = immediate { run(path, null, "git describe --tags --dirty --long --match v*.*".split(" ")) }
+                if (code != 0) return null
+                val version = p.inputStream.bufferedReader().readText().trim().split('-')
+                    .filter { !it.startsWith("g") }
+                    .joinToString(".")
+                    .replace(".dirty", "+dirty")
+                    .substring(1)
+                val (code1, p1) = immediate { run(path, null, "git rev-parse HEAD".split(" ")) }
+                return MonumentVersion(version, if (code1 != 0) null else p1.inputStream.bufferedReader().readText().trim())
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
+        }
     }
+}
+
+fun MonumentVersion?.toString() = this?.toString() ?: "unknown"
+
+fun getMonumentVersion(): MonumentVersion? {
+    val classRoot = getMonumentClassRoot() ?: Paths.get(".")
+    if (classRoot.isRegularFile()) {
+        val manifest = JarInputStream(classRoot.inputStream()).use { it.manifest }
+        if (manifest != null) return MonumentVersion.fromManifest(manifest)
+    }
+    return MonumentVersion.fromGit(if (classRoot.isDirectory()) classRoot else classRoot.parent)
 }
