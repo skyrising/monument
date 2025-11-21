@@ -16,12 +16,19 @@ import java.nio.file.Path
 import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.extension
+
+data class DecompilerNotification(
+    val className: String,
+    val addExtra: Boolean,
+    val trace: Boolean,
+)
 
 interface Decompiler {
     val name: String
     val maxParallelism get() = Integer.MAX_VALUE
-    fun decompile(artifacts: List<MavenArtifact>, version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>? = null, listener: (String,Boolean) -> Unit = { _, _ -> }): CompletableFuture<Path>
+    fun decompile(artifacts: List<MavenArtifact>, version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>? = null, listener: (DecompilerNotification) -> Unit = {}): CompletableFuture<Path>
 
     companion object {
         val CFR = JavaDecompiler("cfr", "de.skyrising.guardian.gen.CfrDecompileTask") {
@@ -46,7 +53,7 @@ interface Decompiler {
 
 @Suppress("unused")
 class CfrDecompileTask : DecompileTask {
-    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (String,Boolean) -> Unit): Path {
+    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (DecompilerNotification) -> Unit): Path {
         val outDir = outputDir(false)
         Timer(version, "decompile").use {
             val options = mutableMapOf(
@@ -59,7 +66,7 @@ class CfrDecompileTask : DecompileTask {
             val driver = CfrDriver.Builder().withOptions(options).build()
             listen({ line ->
                 val cls = line.substringAfter("Processing ", "")
-                if (cls.isNotEmpty()) listener(cls, false)
+                if (cls.isNotEmpty()) listener(DecompilerNotification(cls, addExtra = false, trace = true))
             }) {
                 driver.analyse(listOf(jar.toAbsolutePath().toString()))
             }
@@ -81,7 +88,7 @@ class JavaDecompiler(name: String, private val taskClassName: String, private va
         jar: Path,
         outputDir: (Boolean) -> Path,
         cp: List<Path>?,
-        listener: (String,Boolean) -> Unit
+        listener: (DecompilerNotification) -> Unit
     ): CompletableFuture<Path> = getMavenArtifacts(artifacts).thenCompose { urls: List<URI> ->
         supplyAsync(TaskType.DECOMPILE) {
             outputTo(version) {
@@ -152,7 +159,7 @@ private fun getBaseUrl(cls: Class<*>): URL {
 }
 
 interface DecompileTask {
-    fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (String,Boolean) -> Unit): Path
+    fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (DecompilerNotification) -> Unit): Path
 }
 
 @Suppress("unused")
@@ -187,29 +194,60 @@ open class FernflowerDecompileTask : DecompileTask {
         return args.toTypedArray()
     }
 
-    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (String,Boolean) -> Unit): Path {
+    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (DecompilerNotification) -> Unit): Path {
         val outDir = outputDir(false)
         val clsOutput = outDir.resolve("bin")
         val srcOutput = outDir.resolve("src")
-        Timer(version, "decompile.extractClasses").use {
+        Timer(version, "extractClasses").use {
             getJarFileSystem(jar).use {
                 copy(it.getPath("/"), clsOutput) { p -> p.extension == "class" }
             }
             Files.createDirectories(srcOutput)
         }
-        Timer(version, "decompile").use {
-            listen({ line ->
-                var cls = line.substringAfter("Decompiling class ", "")
-                var preprocessing = false
+        val stage = AtomicInteger(0)
+        val timers = arrayOf(
+            ManualTimer(version, "load"),
+            ManualTimer(version, "preprocess"),
+            ManualTimer(version, "decompile"),
+        )
+        timers[0].start()
+        val currentTask = ThreadLocal<Pair<String, String>>()
+        listen({ line ->
+            var cls = ""
+            var preprocessing = false
+            val current = currentTask.get()
+            var done = false
+            if (line.contains("... done") && current != null) {
+                cls = current.second
+                preprocessing = current.first == "Preprocess class"
+                done = true
+            } else {
+                cls = line.substringAfter("Decompiling class ", "")
                 if (cls.isEmpty()) {
                     cls = line.substringAfter("Preprocessing class ", "")
                     preprocessing = true
                 }
-                if (cls.isNotEmpty()) listener(cls, preprocessing)
-            }) {
-                ConsoleDecompiler.main(getArgs(clsOutput, srcOutput, cp, IFernflowerPreferences.DEFAULTS))
             }
+            if (cls.isNotEmpty()) {
+                val newStage = if (preprocessing) 1 else 2
+                if (stage.compareAndSet(newStage - 1, newStage)) {
+                    timers[newStage - 1].stop()
+                    timers[newStage].start()
+                }
+
+                if (!done) {
+                    val newTask = if (preprocessing) "Preprocess class" else "Decompile class"
+                    currentTask.set(newTask to cls)
+                    TraceEvent.Begin(name = newTask, cat = "decompile,$version", args = mapOf("class" to cls))
+                } else {
+                    TraceEvent.End(name = current.first)
+                    listener(DecompilerNotification(cls, preprocessing, false))
+                }
+            }
+        }) {
+            ConsoleDecompiler.main(getArgs(clsOutput, srcOutput, cp, IFernflowerPreferences.DEFAULTS))
         }
+        timers[stage.get()].stop()
         return srcOutput
     }
 }
@@ -218,7 +256,7 @@ private fun formatClassPath(cp: List<Path>) = cp.joinToString(File.pathSeparator
 
 @Suppress("unused")
 class ProcyonDecompileTask : DecompileTask {
-    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (String,Boolean) -> Unit): Path {
+    override fun decompile(version: String, jar: Path, outputDir: (Boolean) -> Path, cp: List<Path>?, listener: (DecompilerNotification) -> Unit): Path {
         val outDir = outputDir(true)
         val executor = threadLocalContext.get().executor as CustomThreadPoolExecutor
         executor.decompileParallelism = minOf(
@@ -257,7 +295,7 @@ class ProcyonDecompileTask : DecompileTask {
                         } catch (t: Throwable) {
                             errors[internalName] = t
                         }
-                        listener(internalName, false)
+                        listener(DecompilerNotification(internalName, addExtra = false, trace = true))
                     }
                 if (errors.isNotEmpty()) {
                     val sb = StringBuilder()

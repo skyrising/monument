@@ -70,7 +70,7 @@ fun output(key: String, line: String) {
 }
 
 fun getOutputPrintStream(key: String) = outputStreams.computeIfAbsent(key) {
-    PrintStream(FileOutputStream("logs/$key.log")).also { it.println(Thread.currentThread().threadGroup.name) }
+    PrintStream(FileOutputStream("logs/$key.log").buffered()).also { it.println(Thread.currentThread().threadGroup.name) }
 }
 
 fun <R> outputTo(key: String, cb: () -> R): R {

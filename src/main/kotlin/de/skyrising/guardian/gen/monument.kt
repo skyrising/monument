@@ -408,9 +408,9 @@ fun genSources(unit: ProgressUnit, version: VersionInfo, provider: MappingProvid
         for (lib in libs) {
             OPENED_LIBRARIES.computeIfAbsent(lib, ::getJarFileSystem)
         }
-        val decompile = decompiler.decompile(artifacts, version.id, jar, outputDir, libs) { className, addExtra ->
+        val decompile = decompiler.decompile(artifacts, version.id, jar, outputDir, libs) { (className, addExtra, trace) ->
             if (className.replace('.', '/') in classes) {
-                TraceEvent.Instant(name = "${if (addExtra) "Preprocessing" else "Decompiled"} Class", cat = "decompile,${version.id}", args = mapOf("class" to className))
+                if (trace) TraceEvent.Instant(name = "${if (addExtra) "Preprocessed" else "Decompiled"} Class", cat = "decompile,${version.id}", args = mapOf("class" to className))
                 classesUnit.done++
                 if (addExtra) classesUnit.tasks++
             }

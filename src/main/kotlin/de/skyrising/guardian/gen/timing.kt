@@ -15,24 +15,35 @@ import java.util.zip.GZIPOutputStream
 import javax.management.NotificationEmitter
 import javax.management.openmbean.CompositeData
 
-private val timers = mutableListOf<Timer>()
+private val timers = mutableListOf<ManualTimer>()
 
-class Timer(val version: String, val id: String, args: Map<String, Any?> = mapOf()) : AutoCloseable {
-    var start = System.nanoTime()
+open class ManualTimer(val version: String, val id: String, val args: Map<String, Any?> = mapOf()) {
+    var start = 0L
     var end = 0L
-    private val tid = gettid()
-    private val event = TimerEvent(version, id)
+    protected val tid = gettid()
+    protected val event = TimerEvent(version, id)
 
-    init {
+    fun start() {
+        start = System.nanoTime()
         if (event.isEnabled) event.begin()
         TraceEvent.Begin(name = id, cat = "timer,$version", ts = start / 1e3, args = args, tid = tid)
     }
 
-    override fun close() {
-        if (event.shouldCommit()) event.commit()
+    fun stop() {
         end = System.nanoTime()
+        if (event.shouldCommit()) event.commit()
         TraceEvent.End(name = id, ts = end / 1e3, tid = tid)
         timers.add(this)
+    }
+}
+
+class Timer(version: String, id: String, args: Map<String, Any?> = mapOf()) : ManualTimer(version, id, args), AutoCloseable {
+    init {
+        start()
+    }
+
+    override fun close() {
+        stop()
     }
 }
 
@@ -46,8 +57,8 @@ data class TimerEvent(
 
 fun dumpTimers(out: PrintStream) {
     var earliestStart = Long.MAX_VALUE
-    val byVersion = mutableMapOf<String, MutableList<Timer>>()
-    val latestOfVersion = mutableMapOf<String, Timer>()
+    val byVersion = mutableMapOf<String, MutableList<ManualTimer>>()
+    val latestOfVersion = mutableMapOf<String, ManualTimer>()
     for (timer in timers) {
         earliestStart = minOf(earliestStart, timer.start)
         byVersion.computeIfAbsent(timer.version) { mutableListOf() }.add(timer)
