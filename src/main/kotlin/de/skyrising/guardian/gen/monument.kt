@@ -19,6 +19,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.Path
+import kotlin.io.path.createDirectories
 import kotlin.system.exitProcess
 
 val INITIAL_MAX_THREADS = maxOf(Runtime.getRuntime().availableProcessors() - 2, 1)
@@ -27,7 +29,8 @@ var MAX_THREADS = INITIAL_MAX_THREADS
 val threadLocalContext: ThreadLocal<Context> = ThreadLocal.withInitial { Context.default }
 
 val _t = run {
-    TraceEvents.start(Path.of("logs", "trace.json"))
+    Path("logs").createDirectories()
+    TraceEvents.start(Path("logs", "trace.json"))
     Runtime.getRuntime().addShutdownHook(Thread {
         TraceEvents.stop()
     })
